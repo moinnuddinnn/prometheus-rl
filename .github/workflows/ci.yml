@@ -34,6 +34,7 @@ jobs:
       - run: python -m pytest -q
       - run: prometheus-rl network-demo
       - run: prometheus-rl replay-demo
+      - run: prometheus-rl dqn-demo
   paper:
     runs-on: ubuntu-latest
     steps:

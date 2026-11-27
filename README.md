@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 04 / v0.5.0 — finite MDPs, tabular Q-learning, neural Q-networks and uniform experience replay implemented.
+Status: Block 05 / v0.6.0 — vanilla DQN agent implemented; online CartPole training is next.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -48,7 +48,7 @@ prometheus-rl/
 │   ├── __init__.py
 │   ├── __main__.py
 │   ├── core/ (mdp.py, planning.py, examples.py)
-│   ├── agents/ (q_learning.py)
+│   ├── agents/ (q_learning.py, dqn.py, dqn_demo.py)
 │   ├── environments/ (gridworld.py)
 │   ├── networks/ (q_network.py, demo.py)
 │   ├── memory/ (replay.py, batch.py)
@@ -60,7 +60,7 @@ prometheus-rl/
 └── README.md
 ```
 
-Implemented: `core` for finite transition kernels and planning, `agents` for Q-learning, `environments` for GridWorld, and `training` for the tabular loop. `networks` implements neural approximators and `memory` implements replay storage and tensor batching. Future modules: `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
+Implemented: `core` for finite transition kernels and planning, `agents` for tabular Q-learning and DQN, `environments` for GridWorld, and `training` for the tabular loop. `networks` implements neural approximators and `memory` implements replay storage and tensor batching. Future modules: `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
 
 ## Block 01: finite MDP and dynamic programming
 
@@ -146,7 +146,7 @@ prometheus-rl replay-demo
 python -m pytest -q
 ```
 
-A fixed-capacity ring retains the most recent transitions. Appending takes amortized constant time after constructing the immutable transition, and never shifts existing entries. The buffer samples distinct occupied slots uniformly without replacement using its own seeded random generator. Equal-valued transitions in different slots remain distinct sampling units. An undersized buffer raises an error rather than silently returning a smaller batch; a future DQN training loop must wait for sufficient warm-up. Storage needs no PyTorch. Tensor conversion requires the neural extra installed in Block 03.
+A fixed-capacity ring retains the most recent transitions. Appending takes amortized constant time after constructing the immutable transition, and never shifts existing entries. The buffer samples distinct occupied slots uniformly without replacement using its own seeded random generator. Equal-valued transitions in different slots remain distinct sampling units. An undersized buffer raises an error rather than silently returning a smaller batch; the DQN agent waits for sufficient warm-up. Storage needs no PyTorch. Tensor conversion requires the neural extra installed in Block 03.
 
 ```python
 from prometheus_rl.memory import ReplayBuffer, Transition
@@ -170,7 +170,52 @@ print(batch.bootstrap_mask)     # tensor([1.])
 
 Both flags end the episode, but only `terminated` removes the bootstrap term. Time-limit truncation here assumes an external limit, not a terminal state of a finite-horizon MDP. Store the actual final observation, not the reset observation. `collate` supports CPU or a specified PyTorch device and float32/float64. Stored observation tuples own their numeric data; the tensor batch is newly allocated. This is a flat-vector, single-threaded buffer, not prioritized replay or an image-optimized Atari store. `clear` resets the data and insertion index but preserves the RNG stream.
 
-For the demonstration, six experiences with rewards 0 through 5 enter a capacity-four buffer. The retained rewards are `[2, 3, 4, 5]`, and seed 7 samples `[2, 4, 5]` in the tested Python runtime. The corresponding masks are `[1, 0, 1]`; reward 4 is a termination and reward 5 a truncation. The tests exercise wraparound, immutability, validation, reproducibility, sampling frequencies, flag combinations, dtype and network compatibility. No DQN training has yet been performed.
+For the demonstration, six experiences with rewards 0 through 5 enter a capacity-four buffer. The retained rewards are `[2, 3, 4, 5]`, and seed 7 samples `[2, 4, 5]` in the tested Python runtime. The corresponding masks are `[1, 0, 1]`; reward 4 is a termination and reward 5 a truncation. The tests exercise wraparound, immutability, validation, reproducibility, sampling frequencies, flag combinations, dtype and network compatibility. Block 05 uses this buffer for bootstrapped optimization.
+
+## Block 05: vanilla deep Q-learning
+
+Install the neural extra (`python -m pip install -e '.[dev,neural]'`) and run
+`prometheus-rl dqn-demo`. The agent owns independent online and frozen target
+networks, uniform replay, Adam, epsilon-greedy action selection, gradient clipping
+and a counter of successful optimizer steps. The environment loop is deliberately
+separate and arrives in Block 06.
+
+```python
+from prometheus_rl.agents.dqn import DQNAgent, DQNConfig
+from prometheus_rl.memory import Transition
+
+agent = DQNAgent(DQNConfig(), seed=7)
+s = (0., 0., 0., 0.)
+a = agent.act(s, epsilon=0.1)
+agent.observe(Transition(s, a, 1., (0.1, 0., 0., 0.), False))
+result = agent.update()  # None until replay warm-up is satisfied
+agent.save("agent.pt")
+restored = DQNAgent.load("agent.pt")
+```
+
+Default configuration: two hidden layers of 128, discount 0.99, Adam learning
+rate 0.001, capacity 50,000, batch size 64, warm-up 1,000 retained transitions,
+hard target copy every 250 successful optimizer steps, global gradient norm
+bound 10. Epsilon is supplied by the caller; training schedules are Block 06.
+The target is `r + gamma * max Q_target(s_next)` for nonterminal rows and `r`
+otherwise. External truncation does not disable the bootstrap. Targets are
+computed without gradients; only online parameters are optimized. The reported
+`grad_norm` is the pre-clipping norm. Ties use the lowest action index.
+
+The checkpoint contains configuration, both network state dictionaries, Adam
+state and optimizer-step count. Loading uses PyTorch's weights-only loader;
+load only trusted checkpoint files. Replay contents, random streams, environment
+state and training schedules are **not** saved: this supports inference and
+warm-start training, not exact experiment resumption.
+
+The demo uses four transitions from a fully covered deterministic two-stage MDP.
+Immediate cash yields 2, waiting yields 0 then a choice of 5 or 1; discount 0.9.
+After 400 updates with seed 7, the start Q-values were (2.0000, 4.5000), the
+waiting state's maximum was 5.0000, and greedy action 1 was selected (CPU,
+PyTorch 2.10.0). The targets are bootstrapped, unlike Block 03, but this is a
+fixed-replay sanity experiment, not online exploration or a CartPole benchmark.
+Tests cover the analytic solution, target flags, warm-up, gradient clipping,
+seed isolation, synchronization and checkpoint round trips.
 
 ## Roadmap and acceptance criteria
 

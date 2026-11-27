@@ -14,11 +14,11 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.5.0 --- Block 04}
+\date{Technical manuscript v0.6.0 --- Block 05}
 \begin{document}
 \maketitle
 \begin{abstract}
-We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning and tabular Q-learning modules are verified against analytic examples; the neural approximator is tested by gradient checks and controlled fixed-target regression. Uniform replay is implemented and tested for capacity, sampling and episode-end semantics. No full DQN or CartPole training results are reported.
+We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning and tabular Q-learning modules are verified against analytic examples; the neural approximator is tested by gradient checks and controlled fixed-target regression. Uniform replay is implemented and tested for capacity, sampling and episode-end semantics. A vanilla DQN agent is now verified on a fixed-replay analytic MDP; online CartPole training is not yet reported.
 \end{abstract}
 \tableofcontents
 \newpage
@@ -252,10 +252,10 @@ under local smoothness provides an independent numerical check. We use double pr
 
 \paragraph{Tensor contract.} The implementation takes $X\in\R^{B\times n}$ and returns $Q\in\R^{B\times m}$. For action indices $a_i$, gathering yields $q_i=Q_{i,a_i}$ with shape $[B]$. Targets also have shape $[B]$; accidental broadcasting against a $[B,1]$ target is rejected. Targets are detached from the computational graph. For widths $d_0,\ldots,d_L$, storage is $O(\sum_{l=1}^L(d_{l-1}+1)d_l)$ and a dense batch forward pass costs $O(B\sum_l d_{l-1}d_l)$ arithmetic operations; backward propagation has the same asymptotic cost and additionally stores intermediate activations.
 
-\paragraph{Controlled regression experiment.} With seed 7, two fixed four-dimensional observations $(1,0,0,0)$ and $(0,1,0,0)$, selected actions 0 and 1 respectively, and targets $1$ and $-1$, we run 80 full-batch SGD updates at learning rate 0.03. On PyTorch 2.10.0 (CPU), the mean Huber loss falls from 0.44456556 to below $10^{-8}$. This checks forward propagation, differentiation and parameter updates together. It is not an interaction experiment, an estimate of the Bellman fixed point, or evidence of CartPole performance. Block 04 implements replay; bootstrapped optimization remains deferred.
+\paragraph{Controlled regression experiment.} With seed 7, two fixed four-dimensional observations $(1,0,0,0)$ and $(0,1,0,0)$, selected actions 0 and 1 respectively, and targets $1$ and $-1$, we run 80 full-batch SGD updates at learning rate 0.03. On PyTorch 2.10.0 (CPU), the mean Huber loss falls from 0.44456556 to below $10^{-8}$. This checks forward propagation, differentiation and parameter updates together. It is not an interaction experiment, an estimate of the Bellman fixed point, or evidence of CartPole performance. Block 04 implements replay; Block 05 integrates bootstrapped optimization.
 
 \subsection{Replay and target synchronization}
-A replay buffer stores recent experiences and samples minibatches, reducing short-range temporal correlation and permitting reuse of data. Samples are not perfectly independent draws from the stationary state distribution: the buffer is finite and reflects multiple historical policies. At intervals of $C$ environment steps we propose hard synchronization $\bar\theta\leftarrow\theta$. Between synchronizations the bootstrap target is more stationary. The network, replay and target copy are separate modules to make unit tests meaningful.
+A replay buffer stores recent experiences and samples minibatches, reducing short-range temporal correlation and permitting reuse of data. Samples are not perfectly independent draws from the stationary state distribution: the buffer is finite and reflects multiple historical policies. At intervals of $C$ successful optimizer steps the implementation performs hard synchronization $\bar\theta\leftarrow\theta$. Between synchronizations the bootstrap target is more stationary. The network, replay and target copy are separate modules to make unit tests meaningful.
 
 Deep off-policy learning combines bootstrapping, function approximation, and off-policy sampling. This combination can be unstable; the tabular contraction theorem does not transfer to the learned neural projection. Replay and target networks are empirical stabilization techniques, not a proof of convergence.
 
@@ -275,7 +275,7 @@ Deep off-policy learning combines bootstrapping, function approximation, and off
 \draw[->,dashed] (online.south) |- node[pos=.75,below]{copy every $C$ steps} (target.west);
 \draw[->] (online.west) -| (env.south);
 \end{tikzpicture}
-\caption{Proposed DQN architecture. The target network does not receive optimizer gradients.}\label{fig:dqn}
+\caption{DQN architecture. The target network does not receive optimizer gradients.}\label{fig:dqn}
 \end{figure}
 
 
@@ -301,7 +301,7 @@ For $m>1$ and distinct slots $i,j$, $\E[I_iI_j]=b(b-1)/(m(m-1))$, so $\operatorn
 \]
 The variance is zero for a full-buffer batch (or a singleton buffer). The finite-population correction quantifies sampling noise for a fixed buffer only; it does not prove that collected transitions are independent or that deep Q-learning converges.
 
-\paragraph{Episode boundaries and the tensor contract.} The reset condition is $d_i\lor u_i$, whereas the bootstrap multiplier is $1-d_i$. For external time limits, a nonterminal final observation remains a valid continuation state. Accordingly, the future DQN target is
+\paragraph{Episode boundaries and the tensor contract.} The reset condition is $d_i\lor u_i$, whereas the bootstrap multiplier is $1-d_i$. For external time limits, a nonterminal final observation remains a valid continuation state. Accordingly, the DQN target is
 \[
  y_i=r_i+\gamma(1-d_i)\max_a Q_{\bar\theta}(s'_i,a).
 \]
@@ -322,6 +322,73 @@ In CartPole-v1 the standard reward is +1 per step, including the terminating ste
 
 \subsection{Termination versus truncation}
 Gymnasium returns separate termination and truncation flags \cite{gymtime}. A true terminal transition has no future task reward, so $d=1$ in \eqref{eq:target}. An externally imposed time limit usually truncates a continuing task; the state remains meaningful and the target still bootstraps with $d=0$. Both flags end the collection episode, but only true termination removes the bootstrap term in this setting. A genuine finite-horizon objective is different: include time remaining in the state and use zero continuation at its horizon. The collector must preserve the final observation before resetting the environment.
+
+
+\subsection{Block 05: the integrated DQN agent}
+Let $k$ count successful optimizer updates and let $C=250$ by default.
+Initialization copies $\bar\theta_0=\theta_0$ and freezes target parameters.
+No optimization occurs while fewer than 1,000 transitions are retained (default).
+Once warm-up is satisfied, each update samples 64 distinct replay slots and computes
+\[
+y_i=\begin{cases}r_i,&d_i=1,\\
+r_i+\gamma\max_b Q_{\bar\theta}(s'_i,b),&d_i=0.\end{cases}
+\]
+Terminal rows are never passed through the target network. Truncation alone does
+not mask continuation. The empirical objective and its semi-gradient are
+\begin{align*}
+L_J(\theta)&=\frac1B\sum_{i\in J}\ell_1(Q_\theta(s_i,a_i)-y_i),\\
+g_k&=\frac1B\sum_{i\in J}\operatorname{clip}(Q_\theta(s_i,a_i)-y_i,-1,1)
+\nabla_\theta Q_\theta(s_i,a_i).
+\end{align*}
+Here $\ell_1$ is the unit-threshold Huber loss. The label $y_i$ is constant
+for differentiation; target parameters are excluded from Adam. Global gradient
+clipping approximates $\tilde g_k=g_k\min(1,G/\|g_k\|_2)$ for $g_k\ne0$,
+with $G=10$ by default and a small numerical stabilizer in PyTorch. It bounds the
+input gradient norm, not the norm of the Adam parameter update.
+
+Adam accumulates first and second moments (componentwise squares):
+\begin{align*}
+m_k&=\beta_1m_{k-1}+(1-\beta_1)\tilde g_k,\\
+v_k&=\beta_2v_{k-1}+(1-\beta_2)\tilde g_k^2,\\
+\theta_k&=\theta_{k-1}-\eta\frac{m_k/(1-\beta_1^k)}
+{\sqrt{v_k/(1-\beta_2^k)}+\varepsilon_{\mathrm{Adam}}}.
+\end{align*}
+The implementation uses PyTorch Adam defaults $\beta_1=0.9$, $\beta_2=0.999$,
+$\varepsilon_{\mathrm{Adam}}=10^{-8}$ and $\eta=10^{-3}$ unless configured
+otherwise. After each successful update, $\bar\theta_k=\theta_k$ if $C$ divides
+$k$, and $\bar\theta_k=\bar\theta_{k-1}$ otherwise. The behavior policy has
+probability $\epsilon/m$ for every action plus $1-\epsilon$ for the lowest-index
+greedy action. The caller controls the schedule and environment interaction.
+
+\paragraph{Analytic bootstrapping experiment.}
+Consider two nonterminal states $s,w$ and an absorbing terminal state. From $s$,
+action 0 ends with reward 2; action 1 gives reward 0 and enters $w$.
+From $w$, actions 0 and 1 terminate with rewards 5 and 1, respectively.
+For $\gamma=0.9$ the exact Q-values are $Q^*(w,0)=5$, $Q^*(w,1)=1$,
+$Q^*(s,0)=2$ and $Q^*(s,1)=4.5$. The start state prefers the delayed reward.
+We store all four transitions once using two-dimensional one-hot observations,
+a width-16 hidden layer, seed 7, Adam rate 0.01, batch size four and target
+copy period 10. After 400 updates, CPU PyTorch 2.10.0 gives the following values
+(rounded to four decimal places).
+\begin{center}
+\begin{tabular}{lrr}
+\toprule Quantity & Analytic & Observed \\
+\midrule
+$Q(s,0)$ & 2.0000 & 2.0000 \\
+$Q(s,1)$ & 4.5000 & 4.5000 \\
+$\max_a Q(w,a)$ & 5.0000 & 5.0000 \\
+\bottomrule
+\end{tabular}
+\end{center}
+The greedy action is 1. This verifies bootstrapped optimization in a small,
+fully covered fixed dataset; it is neither a proof of nonlinear DQN convergence
+nor a demonstration of exploration or CartPole control.
+
+\paragraph{Checkpoint semantics.}
+The saved state consists of both networks, Adam moments and step state, the
+configuration and the successful update counter. The replay buffer and RNG
+streams are not persisted. Loading therefore reconstructs inference and
+warm-start training, rather than a bitwise continuation of an experiment.
 
 \section{Extensions and the research program}
 \subsection{Double DQN}
@@ -359,7 +426,7 @@ Parameter & Value & Parameter & Value\\
 \midrule
 Discount $\gamma$ & 0.99 & Batch size & 64\\
 Adam learning rate & $10^{-3}$ & Replay capacity & 50,000\\
-Warmup & 1,000 steps & Target copy period & 500 steps\\
+Warmup & 1,000 steps & Target copy period & 250 updates\\
 Exploration & 1.0 to 0.05 & Decay duration & 20,000 steps\\
 Training budget & 100,000 steps & Device & CPU first\\
 \bottomrule
@@ -375,7 +442,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--04 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, and a bounded uniform replay buffer. Full DQN agents, stochastic benchmark studies and all CartPole training remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--05 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, stochastic benchmark studies and CartPole performance remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.
