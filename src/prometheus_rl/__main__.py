@@ -11,7 +11,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
-        "command", nargs="?", choices=["mdp-demo", "q-demo", "network-demo"]
+        "command", nargs="?",
+        choices=["mdp-demo", "q-demo", "network-demo", "replay-demo"]
     )
     args = parser.parse_args(argv)
     if args.command == "mdp-demo":
@@ -56,8 +57,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Initial fixed-target Huber loss: {initial:.8f}")
         print(f"Final fixed-target Huber loss: {final:.8f}")
         print("Fixed-target regression only; not DQN training.")
+    elif args.command == "replay-demo":
+        from prometheus_rl.memory.replay import replay_demo
+
+        retained, sampled, masks = replay_demo()
+        print(f"Retained rewards (oldest first): {retained}")
+        print(f"Sampled rewards: {sampled}")
+        print(f"Bootstrap masks: {masks}")
     else:
-        print("Prometheus-RL: Block 03 neural Q-network implemented.")
+        print("Prometheus-RL: Block 04 experience replay implemented.")
     return 0
 
 

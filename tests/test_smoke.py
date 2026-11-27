@@ -14,7 +14,7 @@ def test_version_matches_metadata():
 
 def test_cli_status(capsys):
     assert main([]) == 0
-    assert "neural Q-network implemented" in capsys.readouterr().out
+    assert "experience replay implemented" in capsys.readouterr().out
 
 
 def test_cli_version(capsys):

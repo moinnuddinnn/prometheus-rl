@@ -14,11 +14,11 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.4.0 --- Block 03}
+\date{Technical manuscript v0.5.0 --- Block 04}
 \begin{document}
 \maketitle
 \begin{abstract}
-We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning and tabular Q-learning modules are verified against analytic examples; the neural approximator is tested by gradient checks and controlled fixed-target regression. No full DQN or CartPole training results are reported.
+We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning and tabular Q-learning modules are verified against analytic examples; the neural approximator is tested by gradient checks and controlled fixed-target regression. Uniform replay is implemented and tested for capacity, sampling and episode-end semantics. No full DQN or CartPole training results are reported.
 \end{abstract}
 \tableofcontents
 \newpage
@@ -252,7 +252,7 @@ under local smoothness provides an independent numerical check. We use double pr
 
 \paragraph{Tensor contract.} The implementation takes $X\in\R^{B\times n}$ and returns $Q\in\R^{B\times m}$. For action indices $a_i$, gathering yields $q_i=Q_{i,a_i}$ with shape $[B]$. Targets also have shape $[B]$; accidental broadcasting against a $[B,1]$ target is rejected. Targets are detached from the computational graph. For widths $d_0,\ldots,d_L$, storage is $O(\sum_{l=1}^L(d_{l-1}+1)d_l)$ and a dense batch forward pass costs $O(B\sum_l d_{l-1}d_l)$ arithmetic operations; backward propagation has the same asymptotic cost and additionally stores intermediate activations.
 
-\paragraph{Controlled regression experiment.} With seed 7, two fixed four-dimensional observations $(1,0,0,0)$ and $(0,1,0,0)$, selected actions 0 and 1 respectively, and targets $1$ and $-1$, we run 80 full-batch SGD updates at learning rate 0.03. On PyTorch 2.10.0 (CPU), the mean Huber loss falls from 0.44456556 to below $10^{-8}$. This checks forward propagation, differentiation and parameter updates together. It is not an interaction experiment, an estimate of the Bellman fixed point, or evidence of CartPole performance. Replay and bootstrapped targets are deliberately deferred to later blocks.
+\paragraph{Controlled regression experiment.} With seed 7, two fixed four-dimensional observations $(1,0,0,0)$ and $(0,1,0,0)$, selected actions 0 and 1 respectively, and targets $1$ and $-1$, we run 80 full-batch SGD updates at learning rate 0.03. On PyTorch 2.10.0 (CPU), the mean Huber loss falls from 0.44456556 to below $10^{-8}$. This checks forward propagation, differentiation and parameter updates together. It is not an interaction experiment, an estimate of the Bellman fixed point, or evidence of CartPole performance. Block 04 implements replay; bootstrapped optimization remains deferred.
 
 \subsection{Replay and target synchronization}
 A replay buffer stores recent experiences and samples minibatches, reducing short-range temporal correlation and permitting reuse of data. Samples are not perfectly independent draws from the stationary state distribution: the buffer is finite and reflects multiple historical policies. At intervals of $C$ environment steps we propose hard synchronization $\bar\theta\leftarrow\theta$. Between synchronizations the bootstrap target is more stationary. The network, replay and target copy are separate modules to make unit tests meaningful.
@@ -277,6 +277,37 @@ Deep off-policy learning combines bootstrapping, function approximation, and off
 \end{tikzpicture}
 \caption{Proposed DQN architecture. The target network does not receive optimizer gradients.}\label{fig:dqn}
 \end{figure}
+
+
+\subsection{Block 04: uniform replay and minibatch statistics}
+Write an experience as $e_i=(s_i,a_i,r_i,s'_i,d_i,u_i)$, where $d_i$ denotes true termination and $u_i$ denotes external truncation. For a capacity $N$, after $t$ insertions the occupied count is $m=\min(t,N)$. The insertion index is $t\bmod N$, and the retained logical window consists of indices $\max(0,t-N),\ldots,t-1$ (zero-based). Once full, each insertion overwrites exactly the oldest experience. The code stores immutable finite vectors, validates action indices and uses a caller-configurable seed for its own random stream.
+
+\paragraph{Uniform sampling without replacement.} Conditional on a fixed buffer of $m$ occupied slots, choose a subset $J$ of size $b\le m$. Every subset has probability $1/\binom{m}{b}$. Let $I_i=\one\{i\in J\}$. Counting subsets containing slot $i$ gives
+\[
+ \Pr(I_i=1)=\frac{\binom{m-1}{b-1}}{\binom{m}{b}}=\frac{b}{m}.
+\]
+For any fixed scalar statistic $f_i=f(e_i)$, the batch mean $\hat\mu=b^{-1}\sum_i I_i f_i$ satisfies
+\[
+ \E[\hat\mu\mid\mathcal D]=\frac1b\sum_i\frac bm f_i
+ =\frac1m\sum_i f_i=\mu_{\mathcal D}.
+\]
+The same result applies coordinatewise to a vector gradient when the model parameters and target values are held fixed. This is unbiased for the empirical buffer objective, not necessarily for the current policy's state distribution or the optimal Bellman objective. The buffer contains experiences collected under changing behavior policies, and successive batches may overlap.
+
+For $m>1$ and distinct slots $i,j$, $\E[I_iI_j]=b(b-1)/(m(m-1))$, so $\operatorname{Cov}(I_i,I_j)=-b(m-b)/(m^2(m-1))$. Expanding the variance of the centered sample mean yields
+\[
+ \operatorname{Var}(\hat\mu\mid\mathcal D)
+ =\frac{1-b/m}{b}S^2,\qquad
+ S^2=\frac{1}{m-1}\sum_{i=1}^m(f_i-\mu_{\mathcal D})^2.
+\]
+The variance is zero for a full-buffer batch (or a singleton buffer). The finite-population correction quantifies sampling noise for a fixed buffer only; it does not prove that collected transitions are independent or that deep Q-learning converges.
+
+\paragraph{Episode boundaries and the tensor contract.} The reset condition is $d_i\lor u_i$, whereas the bootstrap multiplier is $1-d_i$. For external time limits, a nonterminal final observation remains a valid continuation state. Accordingly, the future DQN target is
+\[
+ y_i=r_i+\gamma(1-d_i)\max_a Q_{\bar\theta}(s'_i,a).
+\]
+A task-defined finite horizon is different: remaining time should be represented in the state and true task termination masks continuation. The replay caller must save the actual next observation before reset. Observations have tensor shape $[b,n]$ and actions, rewards, flags and masks have shape $[b]$. The default floating-point dtype is float32, action indices are int64, and flags are Boolean. The collator allocates new tensors and supports float64 for numerical tests.
+
+\paragraph{Complexity and verification.} With observation dimension $n$, storage is $O(Nn)$ for two vectors and scalar fields per transition. Insertion is amortized $O(1)$ after the $O(n)$ construction of an immutable snapshot. The standard-library sampler chooses distinct occupied slots; tensor conversion costs $O(bn)$ and allocates $O(bn)$ additional data. This is a single-threaded flat-vector implementation, not an image-compressed store. In the deterministic demonstration, capacity four retains rewards $2,3,4,5$ after six appends. Seed 7 selects rewards $2,4,5$ in the tested runtime, yielding bootstrap masks $1,0,1$. Tests also check repeated wraparound, empirical inclusion frequencies, all four flag combinations and network-compatible tensor shapes. The experiment validates the replay contract, not learning performance.
 
 \section{CartPole as a control problem}
 CartPole is an inverted pendulum on a movable cart. Its observation is $s=(x,\dot x,\phi,\dot\phi)$, with position, velocity, pole angle relative to upright and angular velocity. Actions apply a fixed horizontal force in either direction. Under the ideal frictionless cart-pole model used in the classic Gymnasium implementation \cite{gymcart}, write $M=m_c+m_p$, $l$ for the pole half-length, and $F$ for force. Define
@@ -344,7 +375,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--03 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, and a tested neural action-value approximator. Full DQN agents, stochastic benchmark studies and all CartPole training remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--04 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, and a bounded uniform replay buffer. Full DQN agents, stochastic benchmark studies and all CartPole training remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.

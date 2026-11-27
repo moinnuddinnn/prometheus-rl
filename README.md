@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 03 / v0.4.0 — finite MDPs, tabular Q-learning and neural Q-networks implemented.
+Status: Block 04 / v0.5.0 — finite MDPs, tabular Q-learning, neural Q-networks and uniform experience replay implemented.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -51,15 +51,16 @@ prometheus-rl/
 │   ├── agents/ (q_learning.py)
 │   ├── environments/ (gridworld.py)
 │   ├── networks/ (q_network.py, demo.py)
+│   ├── memory/ (replay.py, batch.py)
 │   └── training/ (tabular.py)
-├── tests/ (test_smoke.py, test_mdp.py, test_q_learning.py, test_q_network.py)
+├── tests/ (test_smoke.py, test_mdp.py, test_q_learning.py, test_q_network.py, test_replay*.py)
 ├── .gitignore
 ├── CONTRIBUTING.md
 ├── pyproject.toml
 └── README.md
 ```
 
-Implemented: `core` for finite transition kernels and planning, `agents` for Q-learning, `environments` for GridWorld, and `training` for the tabular loop. `networks` implements neural approximators. Future modules: `memory` for replay; `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
+Implemented: `core` for finite transition kernels and planning, `agents` for Q-learning, `environments` for GridWorld, and `training` for the tabular loop. `networks` implements neural approximators and `memory` implements replay storage and tensor batching. Future modules: `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
 
 ## Block 01: finite MDP and dynamic programming
 
@@ -137,6 +138,39 @@ optimizer.step()
 ```
 
 `select_q` gathers one action per observation. `fixed_target_loss` computes mean Huber loss (threshold 1), detaches the targets, and rejects shapes that would accidentally broadcast. The demo uses a fixed CPU batch, seed 7 and 80 SGD updates; observed loss was 0.44456556 initially and below 1e-8 after training (PyTorch 2.10.0 CPU). This is regression, not a DQN agent or CartPole learning result. Tests include parameter counts, invalid shapes, selected-output gradients, detached targets and a central finite-difference check of an early-layer weight. The dependency-light test job skips neural tests; the separate CI neural job installs CPU PyTorch and runs the full suite.
+
+## Block 04: uniform experience replay
+
+```sh
+prometheus-rl replay-demo
+python -m pytest -q
+```
+
+A fixed-capacity ring retains the most recent transitions. Appending takes amortized constant time after constructing the immutable transition, and never shifts existing entries. The buffer samples distinct occupied slots uniformly without replacement using its own seeded random generator. Equal-valued transitions in different slots remain distinct sampling units. An undersized buffer raises an error rather than silently returning a smaller batch; a future DQN training loop must wait for sufficient warm-up. Storage needs no PyTorch. Tensor conversion requires the neural extra installed in Block 03.
+
+```python
+from prometheus_rl.memory import ReplayBuffer, Transition
+from prometheus_rl.memory.batch import collate
+
+memory = ReplayBuffer(capacity=10_000, observation_dim=4, action_dim=2, seed=7)
+memory.append(Transition((0., 0., 0., 0.), 1, 1.,
+                         (0.1, 0., 0.02, 0.), False, True))
+batch = collate(memory.sample(1))
+print(batch.observations.shape)  # torch.Size([1, 4])
+print(batch.bootstrap_mask)     # tensor([1.])
+```
+
+| Tensor | Shape | Default dtype |
+|---|---|---|
+| observations, next_observations | [B,n] | float32 |
+| actions | [B] | int64 |
+| rewards | [B] | float32 |
+| terminated, truncated | [B] | bool |
+| bootstrap_mask | [B] | float32 |
+
+Both flags end the episode, but only `terminated` removes the bootstrap term. Time-limit truncation here assumes an external limit, not a terminal state of a finite-horizon MDP. Store the actual final observation, not the reset observation. `collate` supports CPU or a specified PyTorch device and float32/float64. Stored observation tuples own their numeric data; the tensor batch is newly allocated. This is a flat-vector, single-threaded buffer, not prioritized replay or an image-optimized Atari store. `clear` resets the data and insertion index but preserves the RNG stream.
+
+For the demonstration, six experiences with rewards 0 through 5 enter a capacity-four buffer. The retained rewards are `[2, 3, 4, 5]`, and seed 7 samples `[2, 4, 5]` in the tested Python runtime. The corresponding masks are `[1, 0, 1]`; reward 4 is a termination and reward 5 a truncation. The tests exercise wraparound, immutability, validation, reproducibility, sampling frequencies, flag combinations, dtype and network compatibility. No DQN training has yet been performed.
 
 ## Roadmap and acceptance criteria
 
