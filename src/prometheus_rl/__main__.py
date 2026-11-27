@@ -10,7 +10,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     """Report project status or version."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
-    parser.add_argument("command", nargs="?", choices=["mdp-demo", "q-demo"])
+    parser.add_argument(
+        "command", nargs="?", choices=["mdp-demo", "q-demo", "network-demo"]
+    )
     args = parser.parse_args(argv)
     if args.command == "mdp-demo":
         from prometheus_rl.core import value_iteration
@@ -42,8 +44,20 @@ def main(argv: Sequence[str] | None = None) -> int:
                   f"random={mean(e.discounted_return for e in random):.6f} "
                   f"steps={mean(e.steps for e in greedy):.1f} "
                   f"success={mean(e.terminated for e in greedy):.0%}")
+    elif args.command == "network-demo":
+        try:
+            from prometheus_rl.networks.demo import run_demo
+        except ModuleNotFoundError as error:
+            if error.name != "torch":
+                raise
+            parser.error("install the neural extra: pip install -e '.[neural]'")
+        count, initial, final = run_demo()
+        print(f"Trainable parameters: {count}")
+        print(f"Initial fixed-target Huber loss: {initial:.8f}")
+        print(f"Final fixed-target Huber loss: {final:.8f}")
+        print("Fixed-target regression only; not DQN training.")
     else:
-        print("Prometheus-RL: Block 02 tabular Q-learning implemented.")
+        print("Prometheus-RL: Block 03 neural Q-network implemented.")
     return 0
 
 

@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 02 / v0.3.0 — finite MDP planning and tabular Q-learning implemented.
+Status: Block 03 / v0.4.0 — finite MDPs, tabular Q-learning and neural Q-networks implemented.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -21,7 +21,7 @@ python -m pytest -q
 ruff check .
 ```
 
-The baseline does not install heavy numerical dependencies. When the relevant blocks are implemented, `python -m pip install -e '.[dev,rl]'` installs the planned RL stack. For a CPU-only PyTorch build, consult the official [installation selector](https://pytorch.org/get-started/locally/) first. Use `python -m pip freeze` to record the exact environment for experiments.
+The baseline does not install heavy numerical dependencies. For the full RL dependency stack, `python -m pip install -e '.[dev,rl]'` installs the planned RL stack. For a CPU-only PyTorch build, consult the official [installation selector](https://pytorch.org/get-started/locally/) first. Use `python -m pip freeze` to record the exact environment for experiments.
 
 ## Mathematical foundations
 
@@ -50,15 +50,16 @@ prometheus-rl/
 │   ├── core/ (mdp.py, planning.py, examples.py)
 │   ├── agents/ (q_learning.py)
 │   ├── environments/ (gridworld.py)
+│   ├── networks/ (q_network.py, demo.py)
 │   └── training/ (tabular.py)
-├── tests/ (test_smoke.py, test_mdp.py, test_q_learning.py)
+├── tests/ (test_smoke.py, test_mdp.py, test_q_learning.py, test_q_network.py)
 ├── .gitignore
 ├── CONTRIBUTING.md
 ├── pyproject.toml
 └── README.md
 ```
 
-Implemented: `core` for finite transition kernels and planning, `agents` for Q-learning, `environments` for GridWorld, and `training` for the tabular loop. Future modules: `networks` for neural approximators; `memory` for replay; `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
+Implemented: `core` for finite transition kernels and planning, `agents` for Q-learning, `environments` for GridWorld, and `training` for the tabular loop. `networks` implements neural approximators. Future modules: `memory` for replay; `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
 
 ## Block 01: finite MDP and dynamic programming
 
@@ -106,6 +107,36 @@ Observed CPU results from the five seeds 0–4 (100 held-out episodes per policy
 | 4 | 0.385735 | -0.390399 | 6 | 100% |
 
 The optimal discounted start value from value iteration is 0.385735. Each trained policy attains it, but this deterministic toy experiment does not establish general Q-table convergence or performance on other environments. The 37-test suite checks hand-calculated updates, masking, exploration, reproducibility, planning agreement and frozen evaluation.
+
+## Block 03: neural action-value approximation
+
+Install the optional neural dependency. For a CPU-only Linux setup:
+
+```sh
+python -m pip install 'torch>=2.5,<3' --index-url https://download.pytorch.org/whl/cpu
+python -m pip install -e '.[dev,neural]'
+python -m pytest -q
+prometheus-rl network-demo
+```
+
+The default `QNetwork(4, 2)` uses two 128-unit ReLU hidden layers and a linear output (17,410 trainable parameters). It accepts a floating-point tensor `[n]` or `[B,n]` and returns `[A]` or `[B,A]`. Match the input device and dtype to the model; no softmax is applied. Hidden widths may be configured, including an empty sequence for linear regression. PyTorch is imported only for neural commands and modules.
+
+```python
+import torch
+from prometheus_rl.networks import QNetwork, fixed_target_loss
+
+model = QNetwork(4, 2)
+optimizer = torch.optim.SGD(model.parameters(), lr=0.03)
+observations = torch.tensor([[1., 0., 0., 0.], [0., 1., 0., 0.]])
+actions = torch.tensor([0, 1])
+targets = torch.tensor([1., -1.])
+optimizer.zero_grad(set_to_none=True)
+loss = fixed_target_loss(model(observations), actions, targets)
+loss.backward()
+optimizer.step()
+```
+
+`select_q` gathers one action per observation. `fixed_target_loss` computes mean Huber loss (threshold 1), detaches the targets, and rejects shapes that would accidentally broadcast. The demo uses a fixed CPU batch, seed 7 and 80 SGD updates; observed loss was 0.44456556 initially and below 1e-8 after training (PyTorch 2.10.0 CPU). This is regression, not a DQN agent or CartPole learning result. Tests include parameter counts, invalid shapes, selected-output gradients, detached targets and a central finite-difference check of an early-layer weight. The dependency-light test job skips neural tests; the separate CI neural job installs CPU PyTorch and runs the full suite.
 
 ## Roadmap and acceptance criteria
 
