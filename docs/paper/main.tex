@@ -14,11 +14,11 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.1.0 --- Phase 0}
+\date{Technical manuscript v0.2.0 --- Block 01}
 \begin{document}
 \maketitle
 \begin{abstract}
-We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. This is a design manuscript; no experiments or trained agents are reported at this stage.
+We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning module is implemented and verified against analytic examples; no trained agents or empirical training results are reported.
 \end{abstract}
 \tableofcontents
 \newpage
@@ -56,7 +56,7 @@ For a stationary policy, the probability of a finite trajectory $\tau=(s_0,a_0,r
 \[
  \Pr_\pi(\tau)=\mu_0(s_0)\prod_{t=0}^{T-1}\pi(a_t\mid s_t)p(s_{t+1},r_{t+1}\mid s_t,a_t).
 \]
-This factorization makes explicit which probabilities are controlled by the agent. We treat absorbing terminal states as having zero subsequent reward and a dummy action.
+This factorization makes explicit which probabilities are controlled by the agent. We treat absorbing terminal states as having zero subsequent reward and a dummy action in the mathematical model. The implementation omits the dummy action and explicitly fixes terminal continuation to zero.
 
 \subsection{Discounted return and the objective}
 Define
@@ -120,7 +120,26 @@ Consider states $s_0,s_1$ and an absorbing terminal state. At $s_0$, action \emp
  Q^*(s_0,\text{cash})=2,\quad Q^*(s_1,\text{collect})=5,\quad
  Q^*(s_0,\text{wait})=0.9(5)=4.5.
 \]
-Beginning at $Q_0=0$, the first Bellman iteration learns the immediate rewards; the second propagates 5 backward. A greedy policy on immediate reward alone chooses cash, but a greedy policy on optimal action values chooses wait. This example will be encoded as an analytic regression test.
+Beginning at $Q_0=0$, the first Bellman iteration learns the immediate rewards; the second propagates 5 backward. A greedy policy on immediate reward alone chooses cash, but a greedy policy on optimal action values chooses wait. This example is encoded as an analytic regression test.
+
+
+\subsection{Block 01: state-value planning and residual stopping}
+The implementation uses a state-value vector rather than storing an action-value table. For nonterminal states define
+\begin{align*}
+ (B V)(s)&=\max_{a\in\Aset(s)}\sum_{s',r}p(s',r\mid s,a)[r+\gamma V(s')],\\
+ (B_\pi V)(s)&=\sum_{a\in\Aset(s)}\pi(a\mid s)\sum_{s',r}p(s',r\mid s,a)[r+\gamma V(s')].
+\end{align*}
+Both operators assign zero to terminal states. The maximum inequality in the previous theorem, or the triangle inequality for a convex policy mixture, proves that both are contractions with modulus $\gamma$. Let $F$ denote either operator and $v^*$ its unique fixed point. Then
+\begin{align*}
+ \|v-v^*\|_\infty&\leq\|v-Fv\|_\infty+\|Fv-Fv^*\|_\infty\\
+ &\leq\|v-Fv\|_\infty+\gamma\|v-v^*\|_\infty,\\
+ \|v-v^*\|_\infty&\leq\frac{\|Fv-v\|_\infty}{1-\gamma}.
+\end{align*}
+Consequently the solver stops at the current vector when its computed residual is at most $(1-\gamma)\varepsilon$, rather than returning the next vector with a residual measured at the previous one. The bound is exact in real arithmetic; floating-point rounding and probability-normalization tolerance mean the software does not provide a rigorous interval certificate. If the iteration budget is exhausted without satisfying the test, the solver raises an error. If $K$ counts all outcome atoms, a sweep costs $O(K+|\Sset|)$ time and $O(|\Sset|)$ auxiliary space, not counting the model and policy storage.
+
+For the delayed-reward example, $v_0=(0,0,0)$, $Bv_0=(2,5,0)$ and $B^2v_0=(4.5,5,0)$, which is fixed. The greedy policy waits, then collects. A policy that chooses cash and wait with equal probability has $V^\pi(s_0)=(2+4.5)/2=3.25$. For a continuing one-state model earning one unit per step, $v^*=1/(1-\gamma)$ and $v_k=(1-\gamma^k)/(1-\gamma)$, providing a numerical oracle for the residual bound. A stochastic regression example has probability $1/4$ of terminating with reward 8 and probability $3/4$ of returning to the current state with reward 0. At $\gamma=1/2$, $v=2+3v/8$, hence $v=16/5$.
+
+The code stores each action kernel as a finite list of joint outcome atoms and checks nonnegative probabilities, finite rewards, valid state indices and unit probability mass within a numerical tolerance. It uses state-local action indices, explicit zero terminal continuation, caller-owned random generators, and deterministic lowest-index tie breaking. Value iteration is model-based planning, not yet an agent learning from experience. Its analytic answers will serve as reference values when validating tabular Q-learning in the next block.
 
 \section{Temporal-difference learning and Q-learning}
 Value iteration assumes a known transition kernel. In model-free learning the agent instead observes transitions $e_t=(s_t,a_t,r_{t+1},s_{t+1},d_t)$, with $d_t=1$ for true termination. In TD(0) policy evaluation, the temporal-difference error is
