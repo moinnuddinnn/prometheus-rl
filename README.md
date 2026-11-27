@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 01 / v0.2.0 — finite MDP planning implemented; no trained agents yet.
+Status: Block 02 / v0.3.0 — finite MDP planning and tabular Q-learning implemented.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -47,15 +47,18 @@ prometheus-rl/
 ├── src/prometheus_rl/
 │   ├── __init__.py
 │   ├── __main__.py
-│   └── core/ (mdp.py, planning.py, examples.py)
-├── tests/ (test_smoke.py, test_mdp.py)
+│   ├── core/ (mdp.py, planning.py, examples.py)
+│   ├── agents/ (q_learning.py)
+│   ├── environments/ (gridworld.py)
+│   └── training/ (tabular.py)
+├── tests/ (test_smoke.py, test_mdp.py, test_q_learning.py)
 ├── .gitignore
 ├── CONTRIBUTING.md
 ├── pyproject.toml
 └── README.md
 ```
 
-Implemented: `core` for finite transition kernels and planning. Future modules: `agents` for learning algorithms; `networks` for neural approximators; `memory` for replay; `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
+Implemented: `core` for finite transition kernels and planning, `agents` for Q-learning, `environments` for GridWorld, and `training` for the tabular loop. Future modules: `networks` for neural approximators; `memory` for replay; `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
 
 ## Block 01: finite MDP and dynamic programming
 
@@ -75,6 +78,34 @@ print(random_at_start.values)  # (3.25, 5.0, 0.0)
 `FiniteMDP.transitions[state][action]` is a tuple of `Outcome(probability, next_state, reward)` objects; state and local action indices start at zero. Empty action rows represent terminal states, whose continuation value is zero. Nonempty distributions must sum to one within absolute tolerance 1e-12; floating-point arithmetic is used. The optional initial distribution supports expected initial return. `sample` takes a caller-owned `random.Random` instance.
 
 `bellman_optimality` and `bellman_policy` compute one synchronous update. `value_iteration` and `evaluate_policy` stop when the Bellman residual divided by `1 - gamma` is below the requested tolerance (an error bound in exact arithmetic, not an interval-arithmetic certificate). They raise on iteration-budget exhaustion. Greedy ties choose the lowest local action index. Policy rows contain probabilities; terminal rows are empty. The implementation supports finite discounted problems only (`0 <= gamma < 1`) and needs no third-party runtime dependencies. Planning uses the known model; it is not model-free learning.
+
+## Block 02: model-free tabular Q-learning
+
+Run `prometheus-rl q-demo` to train five independent agents on a deterministic 4×4 GridWorld. Each cell has four actions (north, east, south, west); boundary moves stay in place. The start is the top-left cell and the goal is the bottom-right cell. Entering the goal yields +1; every other action yields -0.05. The discount factor is 0.9. No model probabilities or planning results enter the agent's update.
+
+```python
+from prometheus_rl.environments.gridworld import gridworld
+from prometheus_rl.training.tabular import train, evaluate
+
+mdp = gridworld()
+result = train(mdp, episodes=1000, seed=0)
+held_out = evaluate(mdp, result.agent, episodes=100, seed=10000)
+print(result.agent.values)  # immutable Q-table snapshot
+```
+
+The behavior policy is epsilon-greedy (linear decay from 1 to 0.1); alpha is constant at 0.2. The episode cap is 100 steps. A true terminal transition masks the bootstrap, whereas a time limit ends data collection without masking it. Evaluation freezes the table and compares greedy actions with uniform random actions. Separate random generators control environment and action sampling.
+
+Observed CPU results from the five seeds 0–4 (100 held-out episodes per policy per seed):
+
+| Seed | Greedy discounted return | Random discounted return | Greedy steps | Goal rate |
+|---|---:|---:|---:|---:|
+| 0 | 0.385735 | -0.359807 | 6 | 100% |
+| 1 | 0.385735 | -0.388980 | 6 | 100% |
+| 2 | 0.385735 | -0.338829 | 6 | 100% |
+| 3 | 0.385735 | -0.393943 | 6 | 100% |
+| 4 | 0.385735 | -0.390399 | 6 | 100% |
+
+The optimal discounted start value from value iteration is 0.385735. Each trained policy attains it, but this deterministic toy experiment does not establish general Q-table convergence or performance on other environments. The 37-test suite checks hand-calculated updates, masking, exploration, reproducibility, planning agreement and frozen evaluation.
 
 ## Roadmap and acceptance criteria
 

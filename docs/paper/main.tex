@@ -14,7 +14,7 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.2.0 --- Block 01}
+\date{Technical manuscript v0.3.0 --- Block 02}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -168,6 +168,40 @@ It mixes random exploration and exploitation. Q-learning is off-policy: the targ
 
 For example, with $Q(s,a)=2$, reward 1, next maximum 4, $\gamma=0.9$ and $\alpha=0.1$, the target is $4.6$, TD error is $2.6$, and the new entry is $2.26$. For true termination the same transition instead gives target 1 and new entry $1.9$.
 
+\subsection{Block 02: implementation and analytic benchmark}
+The model-free agent stores one row of action values for each state, with empty rows for terminal states. It is given action counts, $\gamma$ and $\alpha$, but never the transition kernel. Each call to the update function modifies only one entry. If termination occurs, the target is simply $r$; the maximum over an empty terminal action set is never evaluated. A time-limit cutoff ends the episode but does not change the target, because the underlying discounted MDP is not a finite-horizon task.
+
+To see the stochastic approximation structure, write $Y_t=r_{t+1}+\gamma(1-d_t)\max_b Q_t(s_{t+1},b)$, where the continuation term is defined as zero at termination. Define $M_{t+1}=Y_t-(TQ_t)(s_t,a_t)$. Conditional on the past and current state-action pair, $\E[M_{t+1}]=0$. For the visited coordinate the update becomes
+\[
+ Q_{t+1}=Q_t+\alpha_t\big((TQ_t)-Q_t+M_{t+1}\big).
+\]
+This separates the deterministic drift toward the Bellman fixed point from the noise of sampled experience. For a deterministic environment the conditional target noise vanishes, although action selection still determines which coordinates are updated. With $m_s$ actions at state $s$, storage is $O(\sum_s m_s)$ and a greedy choice or bootstrap maximum costs $O(m_s)$ or $O(m_{s'})$, respectively. The constant step size used here is not an almost-sure convergence guarantee in general stochastic MDPs.
+
+\paragraph{Environment and closed-form optimum.} The benchmark is a deterministic $4\times4$ grid with start $(0,0)$ and goal $(3,3)$. The four cardinal moves are available in every nonterminal cell; boundary moves leave the state unchanged. The reward is $-0.05$ on every move except goal entry, which yields $+1$ and terminates. At Manhattan distance $d\geq1$ the shortest path has return
+\[
+ V^*(d)=-0.05\sum_{k=0}^{d-2}\gamma^k+\gamma^{d-1}
+       =-0.05\frac{1-\gamma^{d-1}}{1-\gamma}+\gamma^{d-1}.
+\]
+This expression strictly decreases with $d$ for $\gamma=0.9$, so delaying goal entry cannot improve it; a trajectory that never reaches the goal has return $-0.5$. Thus the start value at $d=6$ is $0.385735$, agreeing with Block 01 value iteration. The terminal value is zero.
+
+\paragraph{Protocol and observed results.} Five training seeds (0--4) each use 1000 episodes, a 100-step cap, $\alpha=0.2$, $\gamma=0.9$, and linear epsilon decay from 1 to 0.1. For each seed $j$, 100 frozen greedy episodes and 100 uniform-random episodes use evaluation seed $10000+2j$; the action generator uses the corresponding seed plus one. Discounted returns, not undiscounted CartPole scores, are reported.
+\begin{table}[ht]
+\centering
+\caption{Observed GridWorld results, Block 02. Each greedy policy attains the analytic optimum.}
+\begin{tabular}{rrrrr}
+\toprule
+Seed & Greedy return & Random return & Greedy steps & Goal rate\\
+\midrule
+0 & 0.385735 & -0.359807 & 6 & 100\%\\
+1 & 0.385735 & -0.388980 & 6 & 100\%\\
+2 & 0.385735 & -0.338829 & 6 & 100\%\\
+3 & 0.385735 & -0.393943 & 6 & 100\%\\
+4 & 0.385735 & -0.390399 & 6 & 100\%\\
+\bottomrule
+\end{tabular}
+\end{table}
+Because the grid and the learned greedy policies are deterministic, the 100 greedy episodes repeat the same outcome for each policy. This validates the learned start-state policy on this small task, not convergence of every Q-table entry, robustness to stochastic transitions, or generalization to other environments. The unit suite also tests the arithmetic of individual updates, terminal masking, seeded sampling and evaluation immutability.
+
 \section{Deep Q-networks}
 A table is impractical for high-dimensional or continuous state spaces. DQN \cite{mnih} approximates the action-value vector by a network $f_\theta:\R^n\to\R^m$, with one output for each discrete action. For CartPole the proposed baseline uses $n=4$, $m=2$, and two fully connected hidden layers of width 128:
 \begin{align*}
@@ -284,7 +318,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Phase 0 establishes project packaging, Git workflow, CI, and this mathematical specification. No learning algorithms are implemented yet, the proposed settings are unvalidated, and all training benchmarks remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--02 establish project packaging, CI, finite MDP planning and tabular Q-learning with a deterministic GridWorld benchmark. Neural agents, stochastic benchmark studies and all CartPole training remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.
