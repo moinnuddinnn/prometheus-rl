@@ -14,11 +14,11 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.3.0 --- Block 02}
+\date{Technical manuscript v0.4.0 --- Block 03}
 \begin{document}
 \maketitle
 \begin{abstract}
-We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning module is implemented and verified against analytic examples; no trained agents or empirical training results are reported.
+We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning and tabular Q-learning modules are verified against analytic examples; the neural approximator is tested by gradient checks and controlled fixed-target regression. No full DQN or CartPole training results are reported.
 \end{abstract}
 \tableofcontents
 \newpage
@@ -203,7 +203,7 @@ Seed & Greedy return & Random return & Greedy steps & Goal rate\\
 Because the grid and the learned greedy policies are deterministic, the 100 greedy episodes repeat the same outcome for each policy. This validates the learned start-state policy on this small task, not convergence of every Q-table entry, robustness to stochastic transitions, or generalization to other environments. The unit suite also tests the arithmetic of individual updates, terminal masking, seeded sampling and evaluation immutability.
 
 \section{Deep Q-networks}
-A table is impractical for high-dimensional or continuous state spaces. DQN \cite{mnih} approximates the action-value vector by a network $f_\theta:\R^n\to\R^m$, with one output for each discrete action. For CartPole the proposed baseline uses $n=4$, $m=2$, and two fully connected hidden layers of width 128:
+A table is impractical for high-dimensional or continuous state spaces. DQN \cite{mnih} approximates the action-value vector by a network $f_\theta:\R^n\to\R^m$, with one output for each discrete action. For CartPole the implemented baseline uses $n=4$, $m=2$, and two fully connected hidden layers of width 128:
 \begin{align*}
  h_1&=\operatorname{ReLU}(W_1s+b_1),& W_1&\in\R^{128\times4},\\
  h_2&=\operatorname{ReLU}(W_2h_1+b_2),& W_2&\in\R^{128\times128},\\
@@ -227,6 +227,32 @@ Gradient descent updates $\theta\leftarrow\theta-\eta\nabla_\theta L$. The targe
  \kappa(|u|-\kappa/2)&|u|>\kappa,\end{cases}
 \]
 with $\kappa=1$. Its derivative is bounded, reducing sensitivity to large TD errors. We will use Adam as an adaptive optimizer, with all hyperparameters recorded. A finite-difference test can check the loss gradient on a small fixed-target network away from ReLU kinks.
+
+
+\subsection{Block 03: backpropagation and the implemented network}
+Let $h_0=s$, $z_l=W_lh_{l-1}+b_l$, and $h_l=\sigma(z_l)$ for $l=1,2$, with $\sigma(x)=\max(0,x)$ coordinatewise. The final layer is linear, $q=z_3$. For a single example with selected action $a$, define $u=q_a-y$ for a fixed scalar target $y$. With unit-threshold Huber loss, the derivative is
+\[
+ \psi(u)=\ell_1'(u)=\begin{cases}u&|u|\le 1,\\ \operatorname{sign}(u)&|u|>1.\end{cases}
+\]
+Write $e_a$ for the $a$th coordinate vector. The output error is $\delta_3=\psi(u)e_a$. Thus only the chosen action output receives a direct loss derivative. By the multivariate chain rule, for the hidden layers,
+\[
+ \delta_l=(W_{l+1}^{\mathsf T}\delta_{l+1})\odot\one_{\{z_l>0\}},\qquad l=2,1.
+\]
+Here $\odot$ denotes elementwise multiplication. At zero the ReLU derivative is not unique; PyTorch uses zero. Since $\partial z_{l,i}/\partial W_{l,ij}=h_{l-1,j}$, the gradients of a single-example loss are outer products:
+\[
+ \nabla_{W_l}\ell=\delta_l h_{l-1}^{\mathsf T},\qquad
+ \nabla_{b_l}\ell=\delta_l.
+\]
+For the mean minibatch loss, sum these gradients and divide by $B$. The implementation uses automatic differentiation to evaluate this chain, rather than a manually coded backward pass. For a weight $w$ away from activation and loss kinks, the central difference
+\[
+ \frac{L(w+\varepsilon)-L(w-\varepsilon)}{2\varepsilon}
+ =\frac{\partial L}{\partial w}+O(\varepsilon^2)
+\]
+under local smoothness provides an independent numerical check. We use double precision, $\varepsilon=10^{-6}$, and a small network with positive activations to avoid nondifferentiable points. The unit test compares an early-layer gradient to this difference with relative tolerance $10^{-6}$. It is a local gradient check, not a general proof of optimizer correctness.
+
+\paragraph{Tensor contract.} The implementation takes $X\in\R^{B\times n}$ and returns $Q\in\R^{B\times m}$. For action indices $a_i$, gathering yields $q_i=Q_{i,a_i}$ with shape $[B]$. Targets also have shape $[B]$; accidental broadcasting against a $[B,1]$ target is rejected. Targets are detached from the computational graph. For widths $d_0,\ldots,d_L$, storage is $O(\sum_{l=1}^L(d_{l-1}+1)d_l)$ and a dense batch forward pass costs $O(B\sum_l d_{l-1}d_l)$ arithmetic operations; backward propagation has the same asymptotic cost and additionally stores intermediate activations.
+
+\paragraph{Controlled regression experiment.} With seed 7, two fixed four-dimensional observations $(1,0,0,0)$ and $(0,1,0,0)$, selected actions 0 and 1 respectively, and targets $1$ and $-1$, we run 80 full-batch SGD updates at learning rate 0.03. On PyTorch 2.10.0 (CPU), the mean Huber loss falls from 0.44456556 to below $10^{-8}$. This checks forward propagation, differentiation and parameter updates together. It is not an interaction experiment, an estimate of the Bellman fixed point, or evidence of CartPole performance. Replay and bootstrapped targets are deliberately deferred to later blocks.
 
 \subsection{Replay and target synchronization}
 A replay buffer stores recent experiences and samples minibatches, reducing short-range temporal correlation and permitting reuse of data. Samples are not perfectly independent draws from the stationary state distribution: the buffer is finite and reflects multiple historical policies. At intervals of $C$ environment steps we propose hard synchronization $\bar\theta\leftarrow\theta$. Between synchronizations the bootstrap target is more stationary. The network, replay and target copy are separate modules to make unit tests meaningful.
@@ -318,7 +344,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--02 establish project packaging, CI, finite MDP planning and tabular Q-learning with a deterministic GridWorld benchmark. Neural agents, stochastic benchmark studies and all CartPole training remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--03 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, and a tested neural action-value approximator. Full DQN agents, stochastic benchmark studies and all CartPole training remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.
