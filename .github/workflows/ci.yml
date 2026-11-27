@@ -33,6 +33,7 @@ jobs:
       - run: python -c "import torch; print(torch.__version__)"
       - run: python -m pytest -q
       - run: prometheus-rl network-demo
+      - run: prometheus-rl replay-demo
   paper:
     runs-on: ubuntu-latest
     steps:
