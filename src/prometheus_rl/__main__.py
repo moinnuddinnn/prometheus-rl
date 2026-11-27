@@ -12,7 +12,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
         "command", nargs="?",
-        choices=["mdp-demo", "q-demo", "network-demo", "replay-demo"]
+        choices=["mdp-demo", "q-demo", "network-demo", "replay-demo", "dqn-demo"]
     )
     args = parser.parse_args(argv)
     if args.command == "mdp-demo":
@@ -64,8 +64,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Retained rewards (oldest first): {retained}")
         print(f"Sampled rewards: {sampled}")
         print(f"Bootstrap masks: {masks}")
+    elif args.command == "dqn-demo":
+        try:
+            from prometheus_rl.agents.dqn_demo import run_demo
+        except ModuleNotFoundError as error:
+            if error.name != "torch":
+                raise
+            parser.error("install the neural extra: pip install -e '.[neural]'")
+        q, v, action = run_demo()
+        print(f"Learned start Q-values: ({q[0]:.4f}, {q[1]:.4f})")
+        print(f"Learned wait value: {v:.4f}")
+        print(f"Greedy start action: {action}")
+        print("Fixed-replay toy MDP; not online CartPole training.")
     else:
-        print("Prometheus-RL: Block 04 experience replay implemented.")
+        print("Prometheus-RL: Block 05 DQN agent implemented.")
     return 0
 
 
