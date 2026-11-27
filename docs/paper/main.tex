@@ -14,11 +14,11 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.6.0 --- Block 05}
+\date{Technical manuscript v0.7.0 --- Block 06}
 \begin{document}
 \maketitle
 \begin{abstract}
-We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning and tabular Q-learning modules are verified against analytic examples; the neural approximator is tested by gradient checks and controlled fixed-target regression. Uniform replay is implemented and tested for capacity, sampling and episode-end semantics. A vanilla DQN agent is now verified on a fixed-replay analytic MDP; online CartPole training is not yet reported.
+We specify a research-oriented reinforcement learning framework, beginning with finite Markov decision processes and progressing to deep Q-learning for CartPole. The manuscript derives Bellman equations, establishes the contraction property underlying value iteration, explains temporal-difference learning and stochastic approximation, and develops the neural-network objective, replay memory, and target networks used by DQN. We distinguish mathematical guarantees in the tabular setting from empirical stabilization in deep learning. A concrete evaluation protocol and a modular implementation plan connect the mathematics to software. The finite MDP planning and tabular Q-learning modules are verified against analytic examples; the neural approximator is tested by gradient checks and controlled fixed-target regression. Uniform replay is implemented and tested for capacity, sampling and episode-end semantics. A vanilla DQN agent is now verified on a fixed-replay analytic MDP; an online CartPole training loop is implemented, but full CartPole performance is not yet measured.
 \end{abstract}
 \tableofcontents
 \newpage
@@ -427,11 +427,65 @@ Parameter & Value & Parameter & Value\\
 Discount $\gamma$ & 0.99 & Batch size & 64\\
 Adam learning rate & $10^{-3}$ & Replay capacity & 50,000\\
 Warmup & 1,000 steps & Target copy period & 250 updates\\
-Exploration & 1.0 to 0.05 & Decay duration & 20,000 steps\\
+Exploration & 1.0 to 0.05 & Decay duration & 30,000 steps\\
 Training budget & 100,000 steps & Device & CPU first\\
 \bottomrule
 \end{tabular}
 \end{table}
+
+
+\subsection{Block 06: online control and experimental protocol}
+In contrast with the fixed-replay experiment, the interaction distribution now
+changes with the learned behavior policy. For interaction index $t$, define
+\[
+ \epsilon_t=\epsilon_0+(\epsilon_f-\epsilon_0)\min(t/D,1),
+ \qquad (\epsilon_0,\epsilon_f,D)=(1,0.05,30000).
+\]
+If $a^*(s)$ denotes the first maximizing action, the behavior distribution is
+\[
+ \pi_t(a\mid s)=(1-\epsilon_t)\one_{a=a^*(s)}+\frac{\epsilon_t}{m}.
+\]
+For two actions the greedy action thus has probability $1-\epsilon_t/2$,
+not $1-\epsilon_t$. The target remains greedy, so the algorithm is off-policy.
+At each environment step we append the actual observed transition before
+attempting a gradient update. With update period $k=4$, replay warmup $w=1000$,
+and a run of $T=100000$ transitions, the number of attempted updates satisfying
+warmup is $\lfloor T/k\rfloor-\lceil w/k\rceil+1=24751$, provided the replay
+capacity is at least $w$. The target is copied every 250 successful updates,
+which is distinct from 250 environment interactions.
+
+\paragraph{Episode boundaries and finite budget.}
+A true termination sets the continuation factor to zero. An external time
+limit ends the episode but retains the next observation for bootstrapping.
+This is the continuing-value convention for a task interrupted by a time
+limit; if the finite horizon were itself part of the intended MDP, remaining
+time would instead need to enter the state and the horizon would terminate it.
+The exact interaction budget counts every transition even when the last episode
+is incomplete. Only completed episodes are included in the return CSV. Under
+CartPole's unit reward, $R_i=L_i\leq500$, where $L_i$ is episode length.
+
+\paragraph{Separate policy evaluation.}
+For a frozen policy $\pi$ and independent reset draws, the estimator
+$\hat J=(1/n)\sum_{i=1}^n R_i$ estimates its expected undiscounted return.
+Its conditional sample variance estimate is
+$s^2=(n-1)^{-1}\sum_i(R_i-\hat J)^2$ for $n>1$; $s/\sqrt n$ is an
+approximate standard error conditional on the trained model. It does not capture
+variation between independently trained models. A random-action policy uses
+identical evaluation reset seeds, but its own independent action RNG. No
+learning, replay writes or checkpoint selection occurs during evaluation.
+The training environment is seeded once, then its random stream continues
+across resets. The final checkpoint, configuration, interaction count, per-episode
+returns, loss, dependency versions and seed information are saved for audit.
+
+\paragraph{Current verification.}
+The local suite passed 111 tests, with the Gymnasium integration smoke test
+skipped because the package was unavailable. In a controlled one-step task,
+800 interactions with online updates learned the rewarding action: mean reward
+1.0 versus 0.5 for the random policy over 50 evaluation episodes. This is a
+software contract check, not evidence of solving CartPole. A separate CI job
+installs Gymnasium and runs a short experiment; the five-seed, 100-episode
+performance criterion remains unverified. A negative result will be retained
+rather than replaced by a favorable seed or shorter evaluation.
 
 \subsection{Evaluation and uncertainty}
 The independent experimental unit is a training seed, not an episode. Use five independent training seeds initially, 100 separate evaluation episodes per trained agent, and compare to a random-action baseline using the same episode budget. For seed $j$, let $\bar R_j=\frac1{100}\sum_{i=1}^{100}R_{ji}$. Report all five means, their overall mean $\bar R=\frac15\sum_j\bar R_j$ and sample standard deviation. A Student-$t$ interval can be reported cautiously with five seeds if its approximate normality assumptions are plausible; do not treat the 500 correlated within-agent observations as 500 independent training runs. Proposed success criterion: every agent has held-out mean return at least 475 out of 500. If this fails, publish the negative result and revise the configuration in a new, traceable experiment. Hyperparameter selection uses validation seeds separate from final test seeds.
@@ -442,7 +496,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--05 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, stochastic benchmark studies and CartPole performance remain future work. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--06 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training is implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.
