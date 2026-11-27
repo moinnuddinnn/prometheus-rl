@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Phase 0 / v0.1.0 — initialized; no learning algorithms or training results yet.
+Status: Block 01 / v0.2.0 — finite MDP planning implemented; no trained agents yet.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -46,15 +46,35 @@ prometheus-rl/
 │   └── paper/main.tex
 ├── src/prometheus_rl/
 │   ├── __init__.py
-│   └── __main__.py
-├── tests/test_smoke.py
+│   ├── __main__.py
+│   └── core/ (mdp.py, planning.py, examples.py)
+├── tests/ (test_smoke.py, test_mdp.py)
 ├── .gitignore
 ├── CONTRIBUTING.md
 ├── pyproject.toml
 └── README.md
 ```
 
-Future modules (not present yet): `core` for transition contracts and MDPs; `agents` for learning algorithms; `networks` for neural approximators; `memory` for replay; `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
+Implemented: `core` for finite transition kernels and planning. Future modules: `agents` for learning algorithms; `networks` for neural approximators; `memory` for replay; `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
+
+## Block 01: finite MDP and dynamic programming
+
+Run `prometheus-rl mdp-demo` (or `python -m prometheus_rl mdp-demo`). The delayed-reward example has optimal values `(4.5, 5.0, 0.0)`: wait for the larger discounted reward rather than cash out immediately.
+
+```python
+from prometheus_rl.core import evaluate_policy, value_iteration
+from prometheus_rl.core.examples import delayed_reward
+
+mdp = delayed_reward()
+optimal = value_iteration(mdp, tolerance=1e-9)
+random_at_start = evaluate_policy(mdp, ((0.5, 0.5), (1.0,), ()))
+print(optimal.values)          # (4.5, 5.0, 0.0)
+print(random_at_start.values)  # (3.25, 5.0, 0.0)
+```
+
+`FiniteMDP.transitions[state][action]` is a tuple of `Outcome(probability, next_state, reward)` objects; state and local action indices start at zero. Empty action rows represent terminal states, whose continuation value is zero. Nonempty distributions must sum to one within absolute tolerance 1e-12; floating-point arithmetic is used. The optional initial distribution supports expected initial return. `sample` takes a caller-owned `random.Random` instance.
+
+`bellman_optimality` and `bellman_policy` compute one synchronous update. `value_iteration` and `evaluate_policy` stop when the Bellman residual divided by `1 - gamma` is below the requested tolerance (an error bound in exact arithmetic, not an interval-arithmetic certificate). They raise on iteration-budget exhaustion. Greedy ties choose the lowest local action index. Policy rows contain probabilities; terminal rows are empty. The implementation supports finite discounted problems only (`0 <= gamma < 1`) and needs no third-party runtime dependencies. Planning uses the known model; it is not model-free learning.
 
 ## Roadmap and acceptance criteria
 
