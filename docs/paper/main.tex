@@ -14,7 +14,7 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v1.2.0 --- Block 11}
+\date{Technical manuscript v2.0.0 --- Block 12}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -892,8 +892,53 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 \subsection{Software contracts}
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
+\section{Experiment management and statistical reporting}
+The dashboard is a local interface to existing training commands, not a new
+learning algorithm. It preserves the distinction between a training run and an
+evaluation episode. The interaction budget counts decisions, not raw Atari
+frames or optimizer steps. A CPU pilot with a reduced replay capacity and a
+capped evaluation horizon is a different protocol from a full experiment.
+
+\subsection{Independent experimental units}
+Let $R_{ji}$ denote evaluation return $i$ from the independently trained agent
+with seed $j$, and let $m$ denote the common number of evaluation episodes.
+Define $X_j=m^{-1}\sum_{i=1}^m R_{ji}$. For $n$ distinct training seeds the
+report computes
+\[
+ \bar X=\frac1n\sum_{j=1}^n X_j,\qquad
+ s_X=\sqrt{\frac{1}{n-1}\sum_{j=1}^n(X_j-\bar X)^2},\quad n>1.
+\]
+The random-policy baseline is aggregated in the same manner. If $n=1$,
+$s_X$ is undefined rather than zero. Duplicate training seeds are flagged and
+not pooled. The law of total variance gives, under conditionally independent
+held-out episodes with finite variance,
+\[
+ \operatorname{Var}(X_j)=\operatorname{Var}(\mu(\Theta_j))+
+ \frac1m\mathbb E[\sigma^2(\Theta_j)],
+\]
+where $\Theta_j$ is the trained model, $\mu$ its conditional mean score and
+$\sigma^2$ its conditional evaluation variance. Increasing $m$ reduces only
+the second term, so more episodes cannot substitute for independent training
+runs. The formula follows by conditioning on $\Theta_j$ and applying the
+variance decomposition to the sample mean. Shared evaluation seeds may induce
+dependence across runs; the reported sample dispersion is descriptive and is
+not automatically a confidence interval.
+
+\subsection{Comparability and limitations}
+The reporting code groups runs by environment, algorithm, training decision
+budget, evaluation episode count and recorded protocol, including agent
+configuration and software provenance. Evaluation seeds are displayed, not
+used as the experimental units. Older summaries may omit metadata, and
+matching recorded fields alone cannot prove identical protocols. Comparing
+algorithms requires matched environment versions, reward definitions and
+evaluation horizons. Atari raw scores are not interchangeable with clipped
+training rewards, and scores from different games cannot be pooled directly.
+No inferential test is generated automatically. Reports export JSON with
+explicit group definitions and missing or duplicate-seed warnings. Full
+multi-seed performance comparisons remain future empirical work.
+
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--11 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, Double DQN, Dueling DQN, prioritized replay, custom games and a separate visual DQN, episodic REINFORCE and vector-observation PPO are implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--12 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, Double DQN, Dueling DQN, prioritized replay, custom games and a separate visual DQN, episodic REINFORCE and vector-observation PPO are implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. The local dashboard and benchmark reporting complete the planned version 2.0 feature set. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.

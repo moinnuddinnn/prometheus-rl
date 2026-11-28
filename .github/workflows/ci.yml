@@ -64,6 +64,8 @@ jobs:
       - run: >-
           prometheus-rl ppo train --game pendulum --steps 128 --horizon 64
           --eval-episodes 1 --output runs/ci-pendulum
+      - run: prometheus-rl benchmark --runs runs --output comparison.json
+      - run: python -c "import json; r=json.load(open('comparison.json')); assert r['groups'] and not r['errors']"
       - uses: actions/upload-artifact@v4
         with:
           name: cartpole-smoke
@@ -86,6 +88,8 @@ jobs:
           --warmup 16 --batch-size 4 --eval-episodes 1 --eval-max-steps 32
           --output runs/ci-atari
       - run: prometheus-rl atari evaluate runs/ci-atari/model.pt --episodes 1 --max-steps 32
+      - run: prometheus-rl benchmark --runs runs --output comparison.json
+      - run: python -c "import json; r=json.load(open('comparison.json')); assert r['groups'] and not r['errors']"
   paper:
     runs-on: ubuntu-latest
     steps:

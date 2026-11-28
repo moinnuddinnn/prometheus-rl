@@ -10,6 +10,14 @@ from prometheus_rl import __version__
 def main(argv: Sequence[str] | None = None) -> int:
     """Report project status or version."""
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "dashboard":
+        from prometheus_rl.dashboard.server import main as dashboard_main
+
+        return dashboard_main(argv[1:])
+    if argv and argv[0] == "benchmark":
+        from prometheus_rl.dashboard.benchmark import main as benchmark_main
+
+        return benchmark_main(argv[1:])
     if argv and argv[0] == "ppo":
         try:
             from prometheus_rl.training.ppo import main as ppo_main
@@ -43,7 +51,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit("Install the rl extra: pip install -e '.[rl]'") from error
     parser = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Games: cartpole, snake, gridworld, atari, ppo (each supports --help)",
+        epilog="Commands: cartpole, snake, gridworld, atari, ppo, dashboard, benchmark",
     )
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
@@ -136,8 +144,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Greedy start action: {action}")
         print("Fixed-replay toy MDP; not online CartPole training.")
     else:
-        print("Prometheus-RL: Block 11 DQN agent implemented; "
-              "CartPole, Snake, GridWorld, Atari, PER and PPO available.")
+        print("Prometheus-RL: v2.0 DQN agent implemented; "
+              "CartPole, Snake, GridWorld, Atari, PER, PPO and dashboard available.")
     return 0
 
 

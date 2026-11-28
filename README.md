@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 11 / v1.2.0 — PPO and episodic REINFORCE implemented; full multi-seed benchmarks pending.
+Status: Block 12 / v2.0.0 release candidate — dashboard and benchmark reporting implemented; full multi-seed benchmarks pending.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari pixel observations and vector-observation policy gradients are now supported.
 
@@ -22,6 +22,59 @@ ruff check .
 ```
 
 The baseline does not install heavy numerical dependencies. For the full RL dependency stack, `python -m pip install -e '.[dev,rl]'` installs the planned RL stack. For a CPU-only PyTorch build, consult the official [installation selector](https://pytorch.org/get-started/locally/) first. Use `python -m pip freeze` to record the exact environment for experiments.
+
+## v2.0 research dashboard
+
+After installing `.[dev,rl]` (and `.[atari]` for the arcade games), run:
+
+```sh
+prometheus-rl dashboard --runs runs --port 8765
+```
+
+Open `http://127.0.0.1:8765` in a desktop browser. The local interface supports
+all eight vector DQN configurations, PPO, vanilla visual DQN and visual
+Double-Dueling DQN. Choose an environment, interaction budget, seed, evaluation
+episode count, device and CPU threads. The default 5,000-step pilot is not a
+mastery benchmark. Atari pilots use a smaller replay buffer and a capped
+1,000-decision evaluation horizon; this changes the measurement protocol.
+
+The dashboard launches one child process at a time, automatically polls its
+console output, and assigns new run directories to avoid overwriting checkpoints.
+The experiment table is refreshed on page reload. Select a completed run for
+return and loss plots, or Play to launch its checkpoint in a desktop window.
+Stopping a job can leave an incomplete directory; it is not reported as a
+completed experiment unless a valid summary exists. The dashboard binds only
+to loopback; do not expose it as a public service. Only open trusted local
+checkpoints. Close with Ctrl+C. The dashboard itself requires no web dependency.
+
+For standalone benchmark reporting:
+
+```sh
+prometheus-rl benchmark --runs runs --output benchmark.json
+```
+
+The report reads DQN, PPO and visual DQN summaries, separates different
+configurations, budgets, commits and recorded software versions, and calculates
+mean and sample standard deviation across training seeds. Duplicate seed groups
+are flagged and their aggregate statistics suppressed. Missing metadata in older
+runs cannot be reconstructed; compare protocols before interpreting results.
+A single seed has no estimate of between-seed standard deviation. Reports do not
+claim significance or algorithm superiority. Existing experiment folders are
+never modified. For a fair comparison, run each variant on several seeds using
+the same environment, decision budget and evaluation protocol. For example:
+
+```sh
+for seed in 0 1 2 3 4; do
+  prometheus-rl cartpole train --steps 50000 --seed "$seed" \
+    --eval-episodes 100 --output "runs/dqn-final-$seed"
+  prometheus-rl ppo train --game cartpole --steps 50000 --seed "$seed" \
+    --eval-episodes 100 --output "runs/ppo-final-$seed"
+done
+prometheus-rl benchmark --runs runs --output comparison.json
+```
+
+These are proposed experiments, not measured results. The dashboard does not
+perform automated hyperparameter searches or claim that games are solved.
 
 ## Mathematical foundations
 
@@ -60,7 +113,7 @@ prometheus-rl/
 └── README.md
 ```
 
-Implemented: `core` for finite transition kernels and planning, `agents` for tabular Q-learning and DQN, `environments` for GridWorld, and `training` for the tabular loop. `networks` implements neural approximators and `memory` implements replay storage and tensor batching. Future modules: `environments` for benchmarks; `training` and `evaluation` for experiment loops; `visualization` for plots and trajectories. Keep policy, data collection and optimization separate so individual components can be tested independently.
+Implemented: `core` for finite transition kernels and planning, `agents` for tabular Q-learning and DQN, `environments` for GridWorld, and `training` for the tabular loop. `networks` implements neural approximators and `memory` implements replay storage and tensor batching. The `dashboard` package adds local job management, experiment normalization and reporting. Keep policy, data collection and optimization separate so individual components can be tested independently.
 
 ## Block 01: finite MDP and dynamic programming
 
@@ -498,7 +551,7 @@ CI; no solved-environment or comparative-performance claim is made here.
 | 9 | feature/09-custom-environments | GridWorld and Snake with environment contract tests |
 | 10 | feature/10-atari | Visual DQN and preprocessing, compute-budget reporting |
 | 11 | feature/11-policy-gradients | Policy gradients and PPO |
-| 12 | feature/12-benchmark-dashboard | Comparative experiments and visualization |
+| 12 | feature/12-dashboard-benchmarks | Comparative experiments and visualization |
 
 ## Reproducibility and evaluation
 
