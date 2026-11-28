@@ -14,7 +14,7 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.9.0 --- Block 08}
+\date{Technical manuscript v1.0.0 --- Block 09}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -548,6 +548,75 @@ still do not contain replay or random-generator state. These are correctness
 checks rather than evidence of improved CartPole performance. A matched-seed
 ablation against uniform replay remains to be run.
 
+\subsection{Block 09: custom games and potential-based reward shaping}
+The new environments have finite physical state spaces, although their agents
+use neural approximation rather than enumerating all configurations. Snake's
+state consists of an ordered self-avoiding body $(b_1,\ldots,b_L)$, heading
+$h\in\{0,1,2,3\}$ and food location $f$ outside the body. Relative actions
+$a\in\{0,1,2\}$ yield $h'=(h+a-1)\bmod 4$ and a proposed next head
+$b'_1=b_1+e_{h'}$. If this cell lies outside the board or intersects the
+retained body, the game terminates with reward $-1$. A non-growth step removes
+the tail, so entering the departing tail is legal. A growth step retains it,
+returns reward $1$, and samples new food uniformly from the complement of the
+body; a full board terminates. Other moves yield $-0.01$.
+
+For a board of $n$ cells, our observation concatenates a rank vector
+$u\in[0,1]^n$ with $u_{b_j}=j/n$ and zeros elsewhere, a food indicator
+$v\in\{0,1\}^n$, and a four-dimensional heading indicator. Its dimension
+$2n+4$ equals 76 on the default six-by-six board. The rank vector determines
+the ordering of every occupied cell, unlike a binary occupancy mask. This
+is sufficient for the physical transition distribution under independent
+uniform food draws. The external time-limit wrapper is deliberately not
+encoded as a physical state variable. No claim is made that a finite-horizon
+optimal policy can be computed without the remaining horizon.
+
+The hazard GridWorld has a fixed layout, one-hot position observations and
+four cardinal actions. Walls induce self-loops, goal and hazards terminate,
+and ordinary moves yield $-0.04$. The default 25-dimensional observation
+suffices for a fixed map, but a changing layout would require map information.
+The optional potential $\Phi(s)=-\|s-g\|_1$ uses the goal coordinate $g$.
+For the same discount $\gamma$ as the agent, define
+\[
+ r'_t=r_t+\gamma\Phi(s_{t+1})-\Phi(s_t).
+\]
+By telescoping, the shaped discounted return over $T$ transitions satisfies
+\[
+ \sum_{t=0}^{T-1}\gamma^t r'_t
+ =\sum_{t=0}^{T-1}\gamma^t r_t-\Phi(s_0)+\gamma^T\Phi(s_T).
+\]
+For bounded potentials in an infinite discounted problem, the last term
+vanishes as $T\to\infty$. For true episodic terminals we set the terminal
+potential to zero. Consequently $Q'^\pi(s,a)=Q^\pi(s,a)-\Phi(s)$ and action
+orderings are preserved. For an external truncation, continuation must not
+be artificially set to zero; the finite prefix retains the boundary term.
+This is why the default CLI evaluates unshaped task returns. The optional
+shaping utility is tested on a two-step path; no empirical advantage is
+claimed. See \cite{ngshaping} for the foundational result.
+
+\paragraph{Pilot experiment.}
+Both games were trained for 10,000 interactions using seed 0, 30 evaluation
+episodes starting at seed 1,000,000, two 64-unit hidden layers, replay capacity
+10,000, batch size 32, warmup 256, target interval 100, epsilon decay 7,000,
+and combined Double, Dueling and prioritized replay. Other DQN defaults
+were retained, with one CPU thread and 2,437 updates per run. These runs
+used the dependency-free dynamics through the shared training loop, not
+the optional Gymnasium adapter. The mean undiscounted returns were:
+\begin{center}
+\begin{tabular}{lrr}
+\toprule Game & Greedy & Uniform random \\
+\midrule
+Gridworld & 0.7200 & -1.9067 \\
+Snake & -0.1377 & -0.8007 \\
+\bottomrule
+\end{tabular}
+\end{center}
+These are preliminary single-seed results, not evidence of robust learning or
+of superiority of prioritized replay. The Snake return is not a food-count
+metric. The full evaluation should report food counts, collisions, successes,
+and uncertainty across independent training seeds. The Gymnasium checker and
+render tests require optional dependencies and are included in CI; visual
+playback has not been verified locally.
+
 \subsection{Beyond value-based control}
 For differentiable policies, define $J(\theta)=\E_{\tau\sim\pi_\theta}[G_0]$. In a finite episodic task, differentiating the trajectory probability and dropping past rewards by conditional expectation yields the score-function identity
 \[
@@ -639,7 +708,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--07 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, Double DQN and Dueling DQN are implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--09 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, Double DQN, Dueling DQN, prioritized replay and custom games are implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.
@@ -651,5 +720,6 @@ The central algorithmic progression is from exact Bellman operators to stochasti
 \bibitem{ppo} J. Schulman et al. Proximal policy optimization algorithms. 2017. \url{https://arxiv.org/abs/1707.06347}.
 \bibitem{gymcart} Farama Foundation. Gymnasium CartPole implementation. \url{https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/envs/classic_control/cartpole.py}.
 \bibitem{gymtime} Farama Foundation. Handling time limits. Gymnasium documentation. \url{https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/}.
+\bibitem{ngshaping} A. Y. Ng, D. Harada, and S. Russell. Policy invariance under reward transformations: theory and application to reward shaping. ICML, 1999.
 \end{thebibliography}
 \end{document}
