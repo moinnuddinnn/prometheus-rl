@@ -35,6 +35,7 @@ jobs:
       - run: prometheus-rl network-demo
       - run: prometheus-rl replay-demo
       - run: prometheus-rl dqn-demo
+      - run: prometheus-rl variants-demo
   cartpole:
     runs-on: ubuntu-latest
     steps:

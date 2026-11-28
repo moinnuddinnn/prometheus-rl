@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 06 / v0.7.0 — online CartPole training implemented; full benchmark pending.
+Status: Block 07 / v0.8.0 — Double and Dueling DQN implemented; full CartPole benchmark pending.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -263,6 +263,52 @@ controlled one-step online task learned the better action (mean reward 1.0 vs
 random 0.5 on 50 episodes); this validates the loop, not CartPole control. The CI
 CartPole job installs the real dependency and performs a short interaction test.
 No CartPole performance numbers are claimed before the full benchmark runs.
+
+## Block 07: Double and Dueling DQN
+
+Two independent switches allow a 2-by-2 factorial comparison. `--double`
+changes the bootstrap rule, selecting an action with the online network and
+evaluating it with the frozen target. `--dueling` changes the network to shared
+ReLU features and separate linear value and advantage heads. Both switches are
+off by default, and existing vanilla checkpoints remain readable. New checkpoint
+configuration records both switches. Checkpoints still omit replay and RNG state.
+
+```sh
+prometheus-rl variants-demo
+prometheus-rl cartpole train --double --dueling --steps 1200 \
+  --eval-episodes 3 --output runs/variants-smoke
+```
+
+The four variants reproduce the fixed-replay analytic example (Q at start:
+2.0000, 4.5000; wait value: 5.0000; greedy action: 1), in 400 optimizer steps
+with seed 7. This is a correctness check, not evidence of a performance gain.
+The default dueling architecture has 17,539 parameters versus 17,410 for vanilla.
+
+For an equal-interaction-budget comparison, use matched training and evaluation
+seeds. Each output directory must be new. This is a proposed benchmark, not a
+completed experiment:
+
+```bash
+for seed in 0 1 2 3 4; do
+  for variant in vanilla double dueling double-dueling; do
+    flags=()
+    case "$variant" in
+      double) flags=(--double);;
+      dueling) flags=(--dueling);;
+      double-dueling) flags=(--double --dueling);;
+    esac
+    prometheus-rl cartpole train "${flags[@]}" --steps 100000 \
+      --seed "$seed" --eval-seed "$((1000000 + 1000 * seed))" \
+      --eval-episodes 100 --output "runs/$variant-$seed"
+  done
+done
+```
+
+Compare per-seed paired returns from `summary.json` rather than pooling all
+episodes as independent training runs. Keep all seeds, including failures. The
+same interaction budget does not imply identical parameter counts or compute.
+The local suite passed 126 tests; one Gymnasium test was skipped because the
+package is unavailable. Remote CI and real CartPole performance remain pending.
 
 ## Roadmap and acceptance criteria
 

@@ -6,11 +6,11 @@ from prometheus_rl.agents.dqn import DQNAgent, DQNConfig
 from prometheus_rl.memory import Transition
 
 
-def run_demo() -> tuple[tuple[float, float], float, int]:
+def run_demo(*, double: bool = False, dueling: bool = False) -> tuple[tuple[float, float], float, int]:
     """Train from a fixed, fully covered replay dataset (not online CartPole)."""
     cfg = DQNConfig(observation_dim=2, hidden_dims=(16,), gamma=0.9,
                     learning_rate=0.01, capacity=4, batch_size=4, warmup=4,
-                    target_interval=10)
+                    target_interval=10, double=double, dueling=dueling)
     agent = DQNAgent(cfg, seed=7)
     start, wait, end = (1., 0.), (0., 1.), (0., 0.)
     for transition in (

@@ -24,7 +24,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
         "command", nargs="?",
-        choices=["mdp-demo", "q-demo", "network-demo", "replay-demo", "dqn-demo"]
+        choices=["mdp-demo", "q-demo", "network-demo", "replay-demo",
+                 "dqn-demo", "variants-demo"]
     )
     args = parser.parse_args(argv)
     if args.command == "mdp-demo":
@@ -76,20 +77,30 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Retained rewards (oldest first): {retained}")
         print(f"Sampled rewards: {sampled}")
         print(f"Bootstrap masks: {masks}")
-    elif args.command == "dqn-demo":
+    elif args.command in {"dqn-demo", "variants-demo"}:
         try:
             from prometheus_rl.agents.dqn_demo import run_demo
         except ModuleNotFoundError as error:
             if error.name != "torch":
                 raise
             parser.error("install the neural extra: pip install -e '.[neural]'")
+        if args.command == "variants-demo":
+            for label, double, dueling in (
+                ("vanilla", False, False), ("double", True, False),
+                ("dueling", False, True), ("double-dueling", True, True),
+            ):
+                q, v, action = run_demo(double=double, dueling=dueling)
+                print(f"{label}: Q=({q[0]:.4f}, {q[1]:.4f}) "
+                      f"wait={v:.4f} action={action}")
+            print("Fixed-replay toy MDP; not online CartPole training.")
+            return 0
         q, v, action = run_demo()
         print(f"Learned start Q-values: ({q[0]:.4f}, {q[1]:.4f})")
         print(f"Learned wait value: {v:.4f}")
         print(f"Greedy start action: {action}")
         print("Fixed-replay toy MDP; not online CartPole training.")
     else:
-        print("Prometheus-RL: Block 06 DQN agent implemented; "
+        print("Prometheus-RL: Block 07 DQN agent implemented; "
               "CartPole training available.")
     return 0
 
