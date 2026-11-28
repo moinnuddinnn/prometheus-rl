@@ -1,4 +1,4 @@
-"""Vanilla DQN with detached target estimates and uniform replay."""
+"""DQN variants with detached target estimates and uniform replay."""
 
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
@@ -11,7 +11,12 @@ from torch import Tensor
 
 from prometheus_rl.memory import ReplayBuffer, Transition
 from prometheus_rl.memory.batch import TransitionBatch, collate
-from prometheus_rl.networks import QNetwork, fixed_target_loss
+from prometheus_rl.networks import (
+    DuelingQNetwork,
+    QNetwork,
+    fixed_target_loss,
+    select_q,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,9 +31,13 @@ class DQNConfig:
     warmup: int = 1_000
     target_interval: int = 250
     max_grad_norm: float = 10.0
+    double: bool = False
+    dueling: bool = False
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "hidden_dims", tuple(self.hidden_dims))
+        if type(self.double) is not bool or type(self.dueling) is not bool:
+            raise ValueError("double and dueling must be bool")
         dimensions = (self.observation_dim, self.action_dim, *self.hidden_dims)
         counts = (self.capacity, self.batch_size, self.warmup, self.target_interval)
         if any(type(x) is not int or x <= 0 for x in (*dimensions, *counts)):
@@ -51,14 +60,24 @@ class UpdateResult:
 
 
 @torch.no_grad()
-def bellman_targets(target: QNetwork, batch: TransitionBatch, gamma: float) -> Tensor:
+def bellman_targets(
+    target: torch.nn.Module, batch: TransitionBatch, gamma: float,
+    *, online: torch.nn.Module | None = None,
+) -> Tensor:
     """Bootstrap only nonterminal rows, including external truncations."""
     if not isfinite(gamma) or not 0 <= gamma < 1:
         raise ValueError("require 0 <= gamma < 1")
     result = batch.rewards.clone()
     active = ~batch.terminated
     if gamma and active.any():
-        result[active] += gamma * target(batch.next_observations[active]).amax(1)
+        observations = batch.next_observations[active]
+        target_values = target(observations)
+        if online is None:
+            continuation = target_values.amax(1)
+        else:
+            actions = online(observations).argmax(dim=1)
+            continuation = select_q(target_values, actions)
+        result[active] += gamma * continuation
     return result
 
 
@@ -74,8 +93,9 @@ class DQNAgent:
         with torch.random.fork_rng(devices=[]):
             torch.random.default_generator.manual_seed(seed)
             dims = (config.observation_dim, config.action_dim, config.hidden_dims)
-            self.online = QNetwork(*dims).to(self.device)
-            self.target = QNetwork(*dims).to(self.device)
+            network = DuelingQNetwork if config.dueling else QNetwork
+            self.online = network(*dims).to(self.device)
+            self.target = network(*dims).to(self.device)
         self.target.requires_grad_(False)
         self.target.eval()
         self.sync_target()
@@ -108,7 +128,10 @@ class DQNAgent:
         if len(self.replay) < cfg.warmup:
             return None
         batch = collate(self.replay.sample(cfg.batch_size), device=self.device)
-        targets = bellman_targets(self.target, batch, cfg.gamma)
+        targets = bellman_targets(
+            self.target, batch, cfg.gamma,
+            online=self.online if cfg.double else None,
+        )
         loss = fixed_target_loss(
             self.online(batch.observations), batch.actions, targets
         )

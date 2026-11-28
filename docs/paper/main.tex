@@ -14,7 +14,7 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.7.0 --- Block 06}
+\date{Technical manuscript v0.8.0 --- Block 07}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -405,6 +405,70 @@ A dueling network \cite{dueling} separates state value and relative action advan
 \]
 Subtracting mean advantage makes the advantage offset irrelevant to the output and ensures $V$ is the mean output Q-value of the architecture (not necessarily the value of an arbitrary policy). Prioritized replay \cite{per} uses priority $p_i=|\delta_i|+\varepsilon$ and sampling probabilities $P(i)=p_i^\alpha/\sum_jp_j^\alpha$. Importance weights $(NP(i))^{-\beta}$ partially correct the changed sampling distribution for $N$ stored transitions; full correction of the uniform-buffer expectation uses $\beta=1$ with unnormalized weights, under fixed priorities and losses. We will compare these extensions individually rather than confound their effects.
 
+
+\subsection{Block 07: decoupling selection and evaluation}
+Let $X_a=q_a+\epsilon_a$ and $Y_a=q_a+\eta_a$ denote the online and target
+estimates at a fixed successor state, respectively. For vanilla DQN,
+convexity of the maximum gives
+\[
+ \E[\max_a Y_a]\geq\max_a\E[Y_a]=\max_a q_a
+\]
+when each target estimate is unbiased. For Double DQN, let $I=\arg\max_a X_a$.
+If $\E[\eta_a\mid X]=0$ for every action, then
+\[
+ \E[Y_I]=\E[q_I]+\E[\E[\eta_I\mid X]]=\E[q_I]\leq\max_a q_a.
+\]
+The difference from the optimum is the expected selection regret. In actual
+DQN, online and target parameters are coupled by periodic copying, so the
+conditional zero-mean assumption is not guaranteed. Double DQN reduces one
+source of upward bias but is neither generally unbiased nor always superior.
+For example, with online estimates $(9,1)$, target estimates $(3,5)$, reward
+2 and $\gamma=0.9$, vanilla produces $6.5$, whereas Double DQN produces $4.7$.
+True terminal rows return 2 under either rule; time-limit truncation alone
+retains bootstrapping. The code computes the targets without autograd.
+
+\subsection{Block 07: dueling decomposition and gradients}
+With $m$ actions and shared features $h(s)$, let the two heads be
+$V=w_v^\top h+b_v$ and $A=W_a h+b_a$. Define
+$C=I_m-\mathbf{1}\mathbf{1}^\top/m$. The output is
+\[
+ Q=V\mathbf{1}+CA,\qquad C^2=C,\qquad C\mathbf{1}=0.
+\]
+The matrix $C$ is an orthogonal projection onto the zero-sum subspace of
+$\R^m$. Thus $m^{-1}\sum_a Q_a=V$, and adding a constant to every component
+of $A$ leaves $Q$ unchanged. Raw advantages still have a redundant additive
+coordinate; centered advantages are uniquely determined by $Q$.
+For selected action $k$ and scalar loss derivative $g=\partial L/\partial Q_k$,
+\[
+ \frac{\partial L}{\partial V}=g,\qquad
+ \frac{\partial L}{\partial A_j}=g(\mathbf{1}_{j=k}-1/m).
+\]
+Consequently the shared representation receives gradients from both streams:
+$\nabla_h L=g w_v+gW_a^\top C e_k$. This does not assert that the value head
+is $V^\pi$; it is the mean of action values in this parameterization.
+For the default 128-dimensional last feature layer the extra value head
+adds 129 parameters (17,539 in total rather than 17,410).
+
+\paragraph{Controlled verification and ablation design.}
+All four configurations (vanilla, double, dueling, both) yield start action
+values $(2.0000,4.5000)$ and wait value $5.0000$ to four decimal places on the
+fixed-replay analytic example after 400 updates with seed 7. All select action
+1. Tests verify target separation, terminal masking, centered aggregation,
+head gradients, checkpoint compatibility and updates in all configurations.
+The local suite passed 126 tests, with one Gymnasium test skipped. This does
+not establish comparative CartPole performance. A factorial study will hold
+interaction budgets and evaluation reset seeds fixed. For each training seed
+$j$, write $R_{j,ab}$ for the mean evaluation return with double flag $a$ and
+dueling flag $b$. The double main-effect contrast is
+\[
+ D_j=\tfrac12[(R_{j,10}-R_{j,00})+(R_{j,11}-R_{j,01})],
+\]
+and the interaction contrast is
+$I_j=R_{j,11}-R_{j,10}-R_{j,01}+R_{j,00}$. Report these contrasts across seeds,
+not across individual episodes as though training runs were independent.
+The full benchmark remains pending, and architecture changes alter parameter
+count even under matched interaction budgets.
+
 \subsection{Beyond value-based control}
 For differentiable policies, define $J(\theta)=\E_{\tau\sim\pi_\theta}[G_0]$. In a finite episodic task, differentiating the trajectory probability and dropping past rewards by conditional expectation yields the score-function identity
 \[
@@ -496,7 +560,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--06 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training is implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--07 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, Double DQN and Dueling DQN are implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.

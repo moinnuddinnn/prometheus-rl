@@ -59,3 +59,38 @@ def fixed_target_loss(values: Tensor, actions: Tensor, targets: Tensor) -> Tenso
     if targets.device != predicted.device or targets.dtype != predicted.dtype:
         raise ValueError("targets must match the prediction device and dtype")
     return F.smooth_l1_loss(predicted, targets.detach(), beta=1.0)
+
+
+class DuelingQNetwork(nn.Module):
+    """Shared features with independent value and centered advantage heads."""
+
+    def __init__(
+        self, observation_dim: int, action_dim: int,
+        hidden_dims: Sequence[int] = (128, 128),
+    ) -> None:
+        super().__init__()
+        dims = (observation_dim, *hidden_dims)
+        if any(type(d) is not int or d <= 0 for d in (*dims, action_dim)):
+            raise ValueError("network dimensions must be positive integers")
+        self.observation_dim = observation_dim
+        self.action_dim = action_dim
+        layers: list[nn.Module] = []
+        for left, right in zip(dims[:-1], dims[1:], strict=True):
+            layers.extend((nn.Linear(left, right), nn.ReLU()))
+        self.features = nn.Sequential(*layers)
+        self.value = nn.Linear(dims[-1], 1)
+        self.advantage = nn.Linear(dims[-1], action_dim)
+
+    def streams(self, observations: Tensor) -> tuple[Tensor, Tensor]:
+        if observations.ndim not in (1, 2) or (
+            observations.shape[-1] != self.observation_dim
+        ) or (observations.ndim == 2 and observations.shape[0] == 0):
+            raise ValueError("observations must have shape [n] or [B,n], B > 0")
+        if not observations.is_floating_point():
+            raise ValueError("observations must be floating point")
+        features = self.features(observations)
+        return self.value(features), self.advantage(features)
+
+    def forward(self, observations: Tensor) -> Tensor:
+        value, advantage = self.streams(observations)
+        return value + advantage - advantage.mean(dim=-1, keepdim=True)

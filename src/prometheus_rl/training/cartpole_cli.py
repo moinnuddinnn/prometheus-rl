@@ -6,7 +6,7 @@ from pathlib import Path
 
 import torch
 
-from prometheus_rl.agents.dqn import DQNAgent
+from prometheus_rl.agents.dqn import DQNAgent, DQNConfig
 from prometheus_rl.training.cartpole import (
     TrainConfig,
     evaluate,
@@ -19,6 +19,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     train_parser = sub.add_parser("train")
+    train_parser.add_argument("--double", action="store_true")
+    train_parser.add_argument("--dueling", action="store_true")
     train_parser.add_argument("--steps", type=int, default=100_000)
     train_parser.add_argument("--seed", type=int, default=0)
     train_parser.add_argument("--eval-seed", type=int, default=1_000_000)
@@ -46,7 +48,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                              train_every=args.train_every, seed=args.seed)
         summary = run_experiment(args.output, config, eval_episodes=args.eval_episodes,
                                  eval_seed=args.eval_seed, device=args.device,
-                                 plots=not args.no_plots)
+                                 plots=not args.no_plots,
+                                 dqn_config=DQNConfig(double=args.double,
+                                                      dueling=args.dueling))
         print(f"Greedy mean: {summary['greedy']['mean']:.2f}")
         print(f"Random mean: {summary['random']['mean']:.2f}")
         print(f"Saved: {args.output}")
