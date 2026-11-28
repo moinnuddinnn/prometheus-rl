@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 07 / v0.8.0 — Double and Dueling DQN implemented; full CartPole benchmark pending.
+Status: Block 08 / v0.9.0 — optional prioritized replay implemented; full CartPole benchmark pending.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -168,7 +168,7 @@ print(batch.bootstrap_mask)     # tensor([1.])
 | terminated, truncated | [B] | bool |
 | bootstrap_mask | [B] | float32 |
 
-Both flags end the episode, but only `terminated` removes the bootstrap term. Time-limit truncation here assumes an external limit, not a terminal state of a finite-horizon MDP. Store the actual final observation, not the reset observation. `collate` supports CPU or a specified PyTorch device and float32/float64. Stored observation tuples own their numeric data; the tensor batch is newly allocated. This is a flat-vector, single-threaded buffer, not prioritized replay or an image-optimized Atari store. `clear` resets the data and insertion index but preserves the RNG stream.
+Both flags end the episode, but only `terminated` removes the bootstrap term. Time-limit truncation here assumes an external limit, not a terminal state of a finite-horizon MDP. Store the actual final observation, not the reset observation. `collate` supports CPU or a specified PyTorch device and float32/float64. Stored observation tuples own their numeric data; the tensor batch is newly allocated. This is a flat-vector, single-threaded buffer, not an image-optimized Atari store (prioritized replay is a separate class). `clear` resets the data and insertion index but preserves the RNG stream.
 
 For the demonstration, six experiences with rewards 0 through 5 enter a capacity-four buffer. The retained rewards are `[2, 3, 4, 5]`, and seed 7 samples `[2, 4, 5]` in the tested Python runtime. The corresponding masks are `[1, 0, 1]`; reward 4 is a termination and reward 5 a truncation. The tests exercise wraparound, immutability, validation, reproducibility, sampling frequencies, flag combinations, dtype and network compatibility. Block 05 uses this buffer for bootstrapped optimization.
 
@@ -309,6 +309,44 @@ episodes as independent training runs. Keep all seeds, including failures. The
 same interaction budget does not imply identical parameter counts or compute.
 The local suite passed 126 tests; one Gymnasium test was skipped because the
 package is unavailable. Remote CI and real CartPole performance remain pending.
+
+## Block 08: Prioritized experience replay
+
+Uniform replay remains the default. Enable proportional prioritized replay with
+`--prioritized` (compatible with `--double` and `--dueling`). The dependency-free
+`PrioritizedReplayBuffer` extends the circular store with sum and minimum trees.
+Each occupied slot has mass `(abs(TD error) + epsilon)**alpha`. New transitions
+receive the largest raw priority observed since the last clear (at least 1).
+Sampling draws independently with replacement, so a minibatch can repeat slots.
+The normalized importance weight is `(minimum_mass / sampled_mass)**beta`.
+The DQN computes a weighted mean of per-example Huber losses, and updates sampled
+priorities from detached, pre-optimization TD errors; duplicate slots use the
+maximum absolute error. Beta anneals from 0.4 to 1 over 25,000 optimizer updates.
+
+```sh
+prometheus-rl per-demo
+prometheus-rl cartpole train --double --dueling --prioritized --steps 1200 \
+  --eval-episodes 3 --output runs/per-smoke
+prometheus-rl cartpole train --double --dueling --prioritized --steps 100000 \
+  --per-alpha 0.6 --per-beta-start 0.4 --per-beta-steps 25000 \
+  --seed 0 --output runs/per-0
+```
+
+Both tree operations (one insertion or priority update, one draw) take O(log N)
+time and trees use O(N) memory in addition to stored experiences. Slot indices
+are not persistent handles: update before another append in the synchronous
+training loop. Alpha zero gives uniform draws **with replacement**, not the
+original buffer's sampling without replacement. At beta=1 the normalized weights
+correct the relative sampling bias up to a common scale conditional on the buffer;
+this does not correct behavior-policy or changing-data distribution bias. Very
+extreme priority ratios may be limited by floating-point precision.
+
+Local tests cover empirical frequencies, weights, eviction, duplicate draws,
+invalid input, all four DQN variants, checkpoint configuration and an exact
+weighted Huber loss calculation. Checkpoints still omit replay and RNG state.
+The real CartPole smoke test is added to CI. Full comparative performance is
+not yet measured. For a paired comparison, run the same configuration with and
+without `--prioritized`, using equal interaction budgets and five matched seeds.
 
 ## Roadmap and acceptance criteria
 

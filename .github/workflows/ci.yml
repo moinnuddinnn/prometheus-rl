@@ -36,6 +36,7 @@ jobs:
       - run: prometheus-rl replay-demo
       - run: prometheus-rl dqn-demo
       - run: prometheus-rl variants-demo
+      - run: prometheus-rl per-demo
   cartpole:
     runs-on: ubuntu-latest
     steps:
@@ -49,6 +50,9 @@ jobs:
       - run: python -m pytest -q tests/test_cartpole.py
       - run: prometheus-rl cartpole train --steps 1200 --eval-episodes 3 --output runs/ci-smoke
       - run: prometheus-rl cartpole evaluate runs/ci-smoke/model.pt --episodes 3
+      - run: >-
+          prometheus-rl cartpole train --double --dueling --prioritized
+          --steps 1200 --eval-episodes 3 --output runs/ci-per --no-plots
       - uses: actions/upload-artifact@v4
         with:
           name: cartpole-smoke

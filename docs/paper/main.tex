@@ -14,7 +14,7 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v0.8.0 --- Block 07}
+\date{Technical manuscript v0.9.0 --- Block 08}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -468,6 +468,85 @@ $I_j=R_{j,11}-R_{j,10}-R_{j,01}+R_{j,00}$. Report these contrasts across seeds,
 not across individual episodes as though training runs were independent.
 The full benchmark remains pending, and architecture changes alter parameter
 count even under matched interaction budgets.
+
+\subsection{Block 08: proportional prioritized replay}
+Let the occupied buffer contain $n$ transitions. For transition $i$ define
+its most recently observed temporal-difference error $\delta_i$ and raw
+priority $p_i=|\delta_i|+\varepsilon$, with $\varepsilon>0$. The sampling mass
+is $m_i=p_i^\alpha$, $0\leq\alpha\leq1$, and
+\[
+ P(i)=\frac{m_i}{Z},\qquad Z=\sum_{j=1}^{n}m_j.
+\]
+In our implementation draws are independent with replacement conditional on the
+buffer. Thus $\Pr(i\text{ appears})=1-(1-P(i))^B$ and the expected count is
+$BP(i)$. At $\alpha=0$, sampling is uniform with replacement, in contrast to
+the original buffer's uniform sampling without replacement. New entries receive
+the largest raw priority observed since initialization or the last clear (at
+least one), and overwritten entries lose their previous mass.
+
+\paragraph{Importance sampling.} For fixed per-entry loss $\ell_i$, a single
+unweighted draw has expectation $\sum_iP(i)\ell_i$, not the uniform mean
+$n^{-1}\sum_i\ell_i$. Set $w_i=(nP(i))^{-\beta}$ for $0\leq\beta\leq1$.
+Then
+\[
+ \E_{i\sim P}[w_i\ell_i]=n^{-\beta}\sum_iP(i)^{1-\beta}\ell_i.
+\]
+At $\beta=1$ this is the uniform mean. The same reasoning applies componentwise
+to a fixed per-entry gradient. We normalize using the maximum weight over all
+occupied slots, not merely the sampled batch. Writing $m_{\min}=\min_i m_i$,
+\[
+ \widetilde w_i=\frac{w_i}{\max_j w_j}
+ =\left(\frac{m_{\min}}{m_i}\right)^\beta\in(0,1].
+\]
+For $\beta=1$ the conditional expectation becomes $nP_{\min}$ times the uniform
+mean, a shared positive factor independent of the sampled index. This removes
+relative sampling bias but is not an exactly unbiased magnitude estimator.
+Neither correction compensates for distribution shift between replay and the
+current policy. Extreme ratios also encounter finite-precision limitations.
+
+\paragraph{Objective and scheduling.} Holding the sampled priorities, weights
+and target values fixed during differentiation, the update minimizes
+\[
+ L_B(\theta)=\frac1B\sum_{k=1}^B\widetilde w_{i_k}
+ h_1\bigl(y_{i_k}-Q_\theta(s_{i_k},a_{i_k})\bigr),
+\]
+where $h_1$ is the threshold-one Huber loss. The gradient is
+\[
+ \nabla_\theta L_B=-\frac1B\sum_k\widetilde w_{i_k}
+ \operatorname{clip}(\delta_{i_k},-1,1)
+ \nabla_\theta Q_\theta(s_{i_k},a_{i_k}).
+\]
+Priorities are refreshed from the
+pre-update detached errors. Repeated indices use the maximum absolute error.
+For optimizer-update count $t$, our default schedule is
+\[
+ \beta_t=0.4+0.6\min(t/25000,1).
+\]
+This is based on optimizer steps rather than environment transitions. The target
+selection rule and dueling representation are orthogonal to the replay choice.
+
+\paragraph{Segment-tree data structure.} Allocate a binary tree with $K$ leaves,
+where $K$ is the least power of two at least the capacity $N$. Unoccupied leaves
+carry sum zero and minimum $+\infty$. Internal nodes store the sum or minimum of
+their two children. The sum root is $Z$ and the minimum root is $m_{\min}$.
+To draw an index, sample $u\sim U[0,Z)$ and descend left when $u$ is smaller
+than the left subtree mass, otherwise subtract that mass and descend right.
+Each occupied leaf is selected on an interval of length $m_i$; hence the draw
+has probability $m_i/Z$. One insertion, priority update or draw takes
+$O(\log N)$ time, and the trees occupy $O(N)$ memory. A batch of size $B$ costs
+$O(B\log N)$ tree operations plus tensor construction. Slot indices are valid
+only while the corresponding transitions remain stored; synchronous updates
+occur before another insertion.
+
+\paragraph{Verification.} With $\alpha=1$ and priorities close to $(1,2,7)$,
+the target probabilities are approximately $(0.1,0.2,0.7)$. A seeded test of
+12,000 draws verifies each empirical frequency within 0.02 of its target.
+Additional tests check the exact probabilities, importance weights, duplicate
+slots, eviction, and the weighted Huber objective. All four network/target
+variants complete prioritized updates and checkpoint round trips. Checkpoints
+still do not contain replay or random-generator state. These are correctness
+checks rather than evidence of improved CartPole performance. A matched-seed
+ablation against uniform replay remains to be run.
 
 \subsection{Beyond value-based control}
 For differentiable policies, define $J(\theta)=\E_{\tau\sim\pi_\theta}[G_0]$. In a finite episodic task, differentiating the trajectory probability and dropping past rewards by conditional expectation yields the score-function identity
