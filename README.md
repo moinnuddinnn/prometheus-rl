@@ -2,9 +2,9 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 10 / v1.1.0 — visual DQN and Atari integration implemented; real Atari and full multi-seed benchmarks pending.
+Status: Block 11 / v1.2.0 — PPO and episodic REINFORCE implemented; full multi-seed benchmarks pending.
 
-Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari pixel observations are now supported and policy gradients are the next milestone.
+Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari pixel observations and vector-observation policy gradients are now supported.
 
 ## Getting started (Ubuntu)
 
@@ -444,6 +444,43 @@ Synthetic pixel tests verify shapes, gradients, storage, flags, target synchroni
 checkpoint restoration and online collection. Real ALE tests and training smoke
 are configured in CI; no real-game scores or playback were verified in the build
 container. Full Atari experiments need considerably larger compute budgets.
+
+## Block 11: policy gradients and PPO
+
+PPO is an on-policy actor–critic algorithm, independent of the DQN replay buffers.
+The actor produces categorical logits for discrete actions or a diagonal Gaussian
+for continuous actions, with a tanh transformation and affine scaling to bounded
+Gymnasium action spaces. The critic estimates a scalar state value. The rollout
+stores behavior-policy log probabilities and fixed value predictions. GAE uses
+separate termination and truncation masks; the final observation of a truncation
+is bootstrapped, but advantages never cross episode resets.
+
+```bash
+prometheus-rl ppo train --game cartpole --steps 2048 --eval-episodes 1 --output runs/ppo-smoke
+prometheus-rl ppo train --game cartpole --steps 50000 --seed 0 --output runs/ppo-cartpole-0
+prometheus-rl ppo train --game pendulum --steps 50000 --seed 0 --output runs/ppo-pendulum-0
+prometheus-rl ppo evaluate runs/ppo-cartpole-0/model.pt --episodes 100
+prometheus-rl ppo play runs/ppo-cartpole-0/model.pt --episodes 3
+```
+
+Snake and GridWorld are also available through `--game`. Training collects 256
+transitions per rollout by default (short final batches are supported), performs
+four epochs over minibatches of 64, and uses clipped likelihood-ratio loss,
+value MSE, entropy regularization, Adam and gradient-norm clipping. For the
+continuous policy, the entropy bonus is the base Gaussian entropy proxy, not
+true squashed-policy entropy. Evaluation uses argmax or squashed Gaussian mean,
+not sampling from the trained stochastic policy. The checkpoint stores the model,
+optimizer, game/configuration and update count; it does not save environment or
+random-generator state for exact resumption. Each run uses a new output directory
+and saves `model.pt`, `episodes.csv`, `updates.csv` and `summary.json`.
+
+Episodic REINFORCE is additionally available through the Python API
+`training.ppo.train_reinforce`; it optimizes discounted reward-to-go with the
+outer discount and treats truncation as the finite-horizon cutoff. PPO has no
+such Monte Carlo cutoff assumption for its critic bootstrap. Unit tests cover
+both policy objectives, GAE masks, continuous action statistics, checkpointing,
+and learning on a two-action bandit. Real CartPole/Pendulum smoke tests run in
+CI; no solved-environment or comparative-performance claim is made here.
 
 ## Roadmap and acceptance criteria
 

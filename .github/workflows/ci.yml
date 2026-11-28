@@ -47,7 +47,7 @@ jobs:
       - run: python -m pip install 'torch>=2.5,<3' --index-url https://download.pytorch.org/whl/cpu
       - run: python -m pip install -e '.[dev,rl]'
       - run: python -c "import gymnasium, matplotlib; print(gymnasium.__version__)"
-      - run: python -m pytest -q tests/test_cartpole.py tests/test_games.py
+      - run: python -m pytest -q tests/test_cartpole.py tests/test_games.py tests/test_ppo.py
       - run: prometheus-rl cartpole train --steps 1200 --eval-episodes 3 --output runs/ci-smoke
       - run: prometheus-rl cartpole evaluate runs/ci-smoke/model.pt --episodes 3
       - run: >-
@@ -57,6 +57,13 @@ jobs:
       - run: prometheus-rl gridworld train --steps 1200 --eval-episodes 3 --output runs/ci-grid --no-plots
       - run: prometheus-rl snake evaluate runs/ci-snake/model.pt --episodes 3
       - run: prometheus-rl gridworld evaluate runs/ci-grid/model.pt --episodes 3
+      - run: >-
+          prometheus-rl ppo train --game cartpole --steps 128 --horizon 64
+          --eval-episodes 1 --output runs/ci-ppo
+      - run: prometheus-rl ppo evaluate runs/ci-ppo/model.pt --episodes 1
+      - run: >-
+          prometheus-rl ppo train --game pendulum --steps 128 --horizon 64
+          --eval-episodes 1 --output runs/ci-pendulum
       - uses: actions/upload-artifact@v4
         with:
           name: cartpole-smoke

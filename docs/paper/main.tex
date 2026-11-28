@@ -14,7 +14,7 @@
 \newtheorem{theorem}{Theorem}
 \title{\textbf{Prometheus-RL}\\[4pt]\large Mathematical Foundations of a Reinforcement Learning Framework}
 \author{Prometheus-RL Project}
-\date{Technical manuscript v1.1.0 --- Block 10}
+\date{Technical manuscript v1.2.0 --- Block 11}
 \begin{document}
 \maketitle
 \begin{abstract}
@@ -697,7 +697,119 @@ For differentiable policies, define $J(\theta)=\E_{\tau\sim\pi_\theta}[G_0]$. In
 \]
 A state-dependent baseline can reduce variance without changing the expectation, since
 \[\E_{a\sim\pi}[\nabla_\theta\log\pi_\theta(a\mid s)]=0.\]
-PPO \cite{ppo} is planned after the DQN family; its clipped probability-ratio objective will be derived in a later version.
+PPO \cite{ppo} is implemented in Block 11; its clipped objective and the actor--critic formulation are developed below.
+
+
+\section{Policy gradients and proximal policy optimization}
+\subsection{Trajectory likelihood and the score-function identity}
+Let $\pi_\theta(a\mid s)$ be a differentiable stochastic policy and
+$\tau=(s_0,a_0,r_0,\ldots,s_T)$ a finite trajectory. Assuming the initial
+distribution and transition kernel do not depend explicitly on $\theta$,
+\[
+p_\theta(\tau)=\mu_0(s_0)\prod_{t=0}^{T-1}
+\pi_\theta(a_t\mid s_t)p(s_{t+1},r_t\mid s_t,a_t).
+\]
+For $J(\theta)=\E_{\tau\sim p_\theta}[\sum_t\gamma^t r_t]$,
+under the usual differentiation-under-the-integral conditions,
+$\nabla p_\theta=p_\theta\nabla\log p_\theta$ implies
+\begin{align*}
+\nabla J(\theta)&=\E\left[G_0\sum_t\nabla\log\pi_\theta(a_t\mid s_t)\right]\\
+&=\E\left[\sum_t\gamma^t G_t\nabla\log\pi_\theta(a_t\mid s_t)\right],\\
+G_t&=\sum_{k=t}^{T-1}\gamma^{k-t}r_k.
+\end{align*}
+The second equality follows because past rewards multiply a conditional
+score with zero mean. Indeed,
+$\sum_a\pi_\theta(a\mid s)\nabla\log\pi_\theta(a\mid s)
+=\nabla\sum_a\pi_\theta(a\mid s)=0$, with the analogous integral for
+continuous actions under regularity conditions. This also permits subtracting
+an action-independent baseline without biasing the score-function gradient.
+REINFORCE \cite{williams} uses a sampled trajectory to approximate this
+expectation. Our episodic API includes the outer $\gamma^t$ weight, treats
+external truncation and the episode cap as finite-horizon cutoffs, and updates
+once per episode. Adam and gradient clipping are practical optimization
+choices, not part of the policy-gradient identity.
+
+\subsection{Actor--critic and generalized advantage estimation}
+Our shared two-layer MLP maps a vector observation to actor outputs and a
+scalar critic $V_\phi(s)$. The advantage is $A^\pi(s,a)=Q^\pi(s,a)-V^\pi(s)$.
+Replacing the full Monte Carlo return by a bootstrapped estimator reduces
+variance at the expense of possible approximation bias. Let $d_t$ denote true
+termination and $u_t$ denote external truncation. The rollout stores the
+actual final observation before any reset. With frozen rollout-time values,
+\begin{align*}
+\delta_t &= r_t+\gamma(1-d_t)V_\phi(s_{t+1})-V_\phi(s_t),\\
+\hat A_t &=\delta_t+\gamma\lambda(1-\max(d_t,u_t))\hat A_{t+1},\\
+\hat R_t &=\hat A_t+V_\phi(s_t).
+\end{align*}
+At the end of the finite rollout the recursive carry is zero, but the last
+TD error still includes the next-state value unless the transition terminated.
+This separates the bootstrap mask from the recurrence mask, preventing
+advantage leakage across reset boundaries. For an uninterrupted trajectory,
+$\hat A_t=\sum_{l\geq0}(\gamma\lambda)^l\delta_{t+l}$, with a finite sum
+for a finite rollout. The GAE parameter $\lambda$ trades off bias and variance
+\cite{gae}. The critic targets and old action log probabilities are held fixed
+throughout the update epochs. Advantages are standardized if their variance
+is sufficiently nonzero; constant or singleton batches retain their signal.
+
+\subsection{Clipped likelihood-ratio objective}
+PPO \cite{ppo} collects a rollout under $\pi_{\mathrm{old}}$ and optimizes
+several minibatch epochs. Define the probability (or density) ratio
+$\rho_t=\exp(\log\pi_\theta(a_t\mid s_t)-
+\log\pi_{\mathrm{old}}(a_t\mid s_t))$. Its clipped surrogate is
+\[
+L^{\mathrm{CLIP}}=\E_t\left[\min\left(\rho_t\hat A_t,
+\operatorname{clip}(\rho_t,1-\epsilon,1+\epsilon)\hat A_t\right)\right].
+\]
+For positive advantage, increasing the ratio above $1+\epsilon$ no longer
+improves this term. For negative advantage, decreasing the ratio below
+$1-\epsilon$ no longer improves it. The minimum is essential: clipping the
+ratio unconditionally would also suppress gradients in directions that make
+the surrogate worse. The actual minimized minibatch objective is
+\[
+\mathcal L=-L^{\mathrm{CLIP}}+c_v\E_t[(V_\phi(s_t)-\hat R_t)^2]
+-c_e\E_t[H(\pi_\theta(\cdot\mid s_t))].
+\]
+We use $\epsilon=0.2$, $c_v=0.5$, $c_e=0.01$, $\gamma=0.99$,
+$\lambda=0.95$, Adam step size $3\times10^{-4}$ and gradient norm cap $0.5$.
+Four epochs with minibatches of 64 follow each rollout of up to 256 decisions.
+The sampled log-ratio diagnostic is not a guaranteed nonnegative KL estimate.
+Clipping is not a formal trust-region constraint or convergence proof. The
+surrogate also fixes the old state-visitation distribution, so it does not
+correct all distribution changes. Unlike our REINFORCE API, PPO does not
+explicitly multiply each term by the outer episode-time discount.
+
+\subsection{Categorical and bounded continuous policies}
+For discrete actions the actor logits $z_a$ define
+$\pi_\theta(a\mid s)=e^{z_a}/\sum_b e^{z_b}$. Entropy is
+$-\sum_a\pi_\theta(a\mid s)\log\pi_\theta(a\mid s)$.
+For continuous control we sample a diagonal Gaussian latent variable
+$z\sim\mathcal N(\mu_\theta(s),\operatorname{diag}(\sigma_\theta^2))$,
+store $z$ in the rollout, and apply $u=\tanh z$. The log density on normalized
+actions is given by change of variables:
+\[
+\log\pi_\theta(u\mid s)=\sum_j\left[\log\mathcal N(z_j;\mu_j,\sigma_j^2)
+-\log(1-\tanh^2 z_j)\right].
+\]
+For numerical stability, $\log(1-\tanh^2 z)=2(\log 2-z-\operatorname{softplus}(-2z))$.
+The environment receives $a=l+(u+1)(h-l)/2$ for fixed finite bounds $l<h$.
+The affine transformation contributes a constant Jacobian to the log density;
+it cancels in the likelihood ratio and is omitted in our stored log probability.
+The continuous entropy term uses the base Gaussian entropy as a proxy, not the
+entropy after the nonlinear transformation. Evaluation is deterministic (argmax
+or transformed mean). The Gaussian policy's mean and log standard deviation
+are learned, with the latter clamped for numerical stability.
+
+\subsection{Verification and experimental limits}
+We test sign-dependent clipping, terminal and truncation masks, Monte Carlo
+returns, batched actor and critic statistics, continuous-policy gradients and
+checkpoint loading. A deterministic two-action bandit with reward one for the
+second action and zero otherwise verifies online PPO and REINFORCE learning.
+This is a controlled sanity check, not a CartPole or Pendulum performance
+benchmark. The PPO CLI supports CartPole, Pendulum, Snake and hazard GridWorld.
+A real-environment CI smoke test checks CartPole and Pendulum; full comparative
+experiments with DQN require identical interaction budgets and separate training
+and evaluation seeds. In particular, PPO uses no experience replay or target
+network, and its policy and critic are jointly optimized.
 
 \section{Experimental design and implementation contracts}
 \subsection{Proposed baseline configuration}
@@ -781,7 +893,7 @@ Reproducibility requires the commit hash, package versions, environment ID, devi
 The finite MDP layer validates transition probabilities and exposes Bellman operators; the tabular agent implements \eqref{eq:qlearn}; the replay layer stores transition data including both episode-end flags; the network layer maps batched observations to action values; the DQN agent implements \eqref{eq:target} and the semi-gradient update; the training loop manages interaction budgets and evaluation. Each contract has an associated test: analytic Bellman solutions, terminal masking, replay capacity and seed behavior, tensor dimensions, target immutability, and held-out evaluation. We will retain small deterministic tests even after adding stochastic experiments.
 
 \section{Conclusion and current limitations}
-The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--10 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, Double DQN, Dueling DQN, prioritized replay, custom games and a separate visual DQN are implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
+The central algorithmic progression is from exact Bellman operators to stochastic tabular updates and then to neural approximations. The rigorous guarantees apply to their stated mathematical assumptions, whereas deep Q-learning must be evaluated empirically. Blocks 00--11 establish project packaging, CI, finite MDP planning, tabular Q-learning with a deterministic GridWorld benchmark, a tested neural action-value approximator, a bounded uniform replay buffer, and a vanilla DQN agent tested on a fixed-replay problem. Online DQN training, Double DQN, Dueling DQN, prioritized replay, custom games and a separate visual DQN, episodic REINFORCE and vector-observation PPO are implemented; the five-seed CartPole benchmark and stochastic performance claims remain pending. Each subsequent pull request will update both implementation and manuscript so that mathematical claims remain aligned with code and observed results.
 
 \begin{thebibliography}{9}
 \bibitem{sutton} R. S. Sutton and A. G. Barto. \emph{Reinforcement Learning: An Introduction}, 2nd ed., MIT Press, 2018. \url{http://incompleteideas.net/book/the-book-2nd.html}.
@@ -790,6 +902,8 @@ The central algorithmic progression is from exact Bellman operators to stochasti
 \bibitem{double} H. van Hasselt, A. Guez, and D. Silver. Deep reinforcement learning with double Q-learning. AAAI, 2016. \url{https://arxiv.org/abs/1509.06461}.
 \bibitem{dueling} Z. Wang et al. Dueling network architectures for deep reinforcement learning. ICML, 2016. \url{https://arxiv.org/abs/1511.06581}.
 \bibitem{per} T. Schaul et al. Prioritized experience replay. ICLR, 2016. \url{https://arxiv.org/abs/1511.05952}.
+\bibitem{williams} R. J. Williams. Simple statistical gradient-following algorithms for connectionist reinforcement learning. \emph{Machine Learning}, 8:229--256, 1992. \url{https://doi.org/10.1007/BF00992696}.
+\bibitem{gae} J. Schulman et al. High-dimensional continuous control using generalized advantage estimation. ICLR, 2016. \url{https://arxiv.org/abs/1506.02438}.
 \bibitem{ppo} J. Schulman et al. Proximal policy optimization algorithms. 2017. \url{https://arxiv.org/abs/1707.06347}.
 \bibitem{gymcart} Farama Foundation. Gymnasium CartPole implementation. \url{https://github.com/Farama-Foundation/Gymnasium/blob/main/gymnasium/envs/classic_control/cartpole.py}.
 \bibitem{gymtime} Farama Foundation. Handling time limits. Gymnasium documentation. \url{https://gymnasium.farama.org/tutorials/gymnasium_basics/handling_time_limits/}.
