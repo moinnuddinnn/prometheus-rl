@@ -10,6 +10,17 @@ from prometheus_rl import __version__
 def main(argv: Sequence[str] | None = None) -> int:
     """Report project status or version."""
     argv = list(sys.argv[1:] if argv is None else argv)
+    if argv and argv[0] == "atari":
+        try:
+            from prometheus_rl.training.atari import main as atari_main
+
+            return atari_main(argv[1:])
+        except ModuleNotFoundError as error:
+            if error.name not in {"torch", "numpy", "gymnasium", "ale_py", "cv2"}:
+                raise
+            raise SystemExit(
+                "Install the atari extra: pip install -e '.[atari]'"
+            ) from error
     if argv and argv[0] in {"cartpole", "snake", "gridworld"}:
         try:
             from prometheus_rl.training.cartpole_cli import main as cartpole_main
@@ -23,7 +34,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise SystemExit("Install the rl extra: pip install -e '.[rl]'") from error
     parser = argparse.ArgumentParser(
         description=__doc__,
-        epilog="Games: cartpole, snake, gridworld (each supports --help)",
+        epilog="Games: cartpole, snake, gridworld, atari (each supports --help)",
     )
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
@@ -116,8 +127,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Greedy start action: {action}")
         print("Fixed-replay toy MDP; not online CartPole training.")
     else:
-        print("Prometheus-RL: Block 09 DQN agent implemented; "
-              "CartPole, Snake, GridWorld and prioritized replay available.")
+        print("Prometheus-RL: Block 10 DQN agent implemented; "
+              "CartPole, Snake, GridWorld, Atari and prioritized replay available.")
     return 0
 
 

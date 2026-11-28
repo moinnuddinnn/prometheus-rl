@@ -2,9 +2,9 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 09 / v1.0.0 — custom Snake and hazard GridWorld implemented; full multi-seed benchmarks pending.
+Status: Block 10 / v1.1.0 — visual DQN and Atari integration implemented; real Atari and full multi-seed benchmarks pending.
 
-Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
+Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari pixel observations are now supported and policy gradients are the next milestone.
 
 ## Getting started (Ubuntu)
 
@@ -392,6 +392,58 @@ updates. Exact pilot configuration can be reconstructed using `make_game`,
 - snake: greedy mean -0.1377; random mean -0.8007.
 
 The Snake pilot does not establish game mastery. Gymnasium checker and headless RGB rendering tests require Gymnasium; human display requires a graphical session. Use Ctrl-C to stop playback early.
+
+## Block 10: visual DQN / Atari
+
+Install the optional Atari stack (Gymnasium, ALE, OpenCV, NumPy and PyTorch):
+
+```sh
+python -m pip install -e '.[dev,rl,atari]'
+ruff check .
+python -m pytest -q
+OMP_NUM_THREADS=1 prometheus-rl atari train --game breakout --steps 1200 \
+  --eval-episodes 1 --eval-max-steps 1000 --output runs/atari-smoke
+```
+
+The ALE adapter uses `ALE/Breakout-v5` or `ALE/Pong-v5`, with base frame skip 1,
+preprocessing frame skip 4, sticky action probability 0.25, random reset no-ops,
+max-pooling of the most recent two frames, grayscale resizing to 84×84, and four
+stacked frames. Life loss alone does not terminate an episode. No automatic FIRE
+reset is used: the policy must learn any required start/serve actions. See the
+[ALE interface](https://ale.farama.org/main/gymnasium-interface/) and
+[Gymnasium preprocessing docs](https://gymnasium.farama.org/api/wrappers/misc_wrappers/).
+
+The visual network uses 32 8×8/4, 64 4×4/2 and 64 3×3/1 convolutions,
+then 3136 → 512 → action values. Byte observations become float32 in the forward
+pass with division by 255. Default Double-Dueling DQN uses uniform replay;
+`--vanilla` turns off both improvements. Pixel-based PER is not implemented.
+Independent current/next frame stacks are copied into the circular replay:
+56,448 bytes per transition, or 282,240,000 bytes (~269 MiB) at capacity 5,000,
+excluding metadata, batches, models and optimizer state. This is deliberately
+simpler than frame-deduplicated replay and is not suitable for million-item
+buffers. Training rewards are clipped to their sign; episode scores are raw.
+
+```sh
+OMP_NUM_THREADS=1 prometheus-rl atari train --game pong --steps 100000 \
+  --seed 0 --output runs/pong-0
+prometheus-rl atari evaluate runs/pong-0/model.pt --episodes 5
+prometheus-rl atari play runs/pong-0/model.pt --episodes 3
+```
+
+Use `--device cuda` only with a compatible CUDA PyTorch installation. The output
+contains `model.pt`, `episodes.csv`, and `summary.json`, including elapsed training
+time, interaction and update budgets, versions, commit, seed, and raw greedy/random
+evaluation scores. Evaluation is capped at 27,000 decisions per episode by default;
+a smaller cap in smoke tests is not comparable with a full-game score. The 100,000
+decision command is a pilot, not a mastery claim; it corresponds to at most 400,000
+repeated-action frames excluding reset no-ops. Checkpoints are not exact training
+resumption snapshots: replay and RNG state are not persisted. Visual checkpoints
+are distinct from vector DQN checkpoints.
+
+Synthetic pixel tests verify shapes, gradients, storage, flags, target synchronization,
+checkpoint restoration and online collection. Real ALE tests and training smoke
+are configured in CI; no real-game scores or playback were verified in the build
+container. Full Atari experiments need considerably larger compute budgets.
 
 ## Roadmap and acceptance criteria
 
