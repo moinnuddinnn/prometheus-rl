@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 08 / v0.9.0 — optional prioritized replay implemented; full CartPole benchmark pending.
+Status: Block 09 / v1.0.0 — custom Snake and hazard GridWorld implemented; full multi-seed benchmarks pending.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -347,6 +347,51 @@ weighted Huber loss calculation. Checkpoints still omit replay and RNG state.
 The real CartPole smoke test is added to CI. Full comparative performance is
 not yet measured. For a paired comparison, run the same configuration with and
 without `--prioritized`, using equal interaction budgets and five matched seeds.
+
+## Block 09: custom game environments
+
+The original tabular `gridworld()` remains unchanged. The new online `HazardGrid`
+and `Snake` implement dependency-free five-return step semantics; `GameEnv`
+provides Gymnasium spaces and optional RGB-array or Pygame human rendering.
+All eight DQN configurations share the same training loop. Install `.[dev,rl]`.
+
+```sh
+prometheus-rl snake train --double --dueling --prioritized --steps 100000 --output runs/snake-0
+prometheus-rl snake play runs/snake-0/model.pt --episodes 3
+prometheus-rl gridworld train --double --dueling --prioritized --steps 30000 --output runs/grid-0
+prometheus-rl gridworld play runs/grid-0/model.pt --episodes 3
+```
+
+Snake uses a 6x6 board, three relative actions (left, straight, right), and
+76 observations: 36 normalized ordered body ranks, 36 food indicators and
+four heading indicators. Food spawns uniformly on vacant cells. Eating yields
++1, ordinary moves -0.01, collision -1. Filling the board is terminal; the
+150-step external limit truncates. Moving into the vacating tail is legal.
+The rank encoding preserves the order of the body, not just occupancy.
+
+Hazard GridWorld uses a fixed 5x5 map, 25 one-hot position features and four
+absolute actions (north, east, south, west). Walls and boundaries block moves;
+ordinary steps cost 0.04, hazards terminate with -1, and the goal terminates
+with +1. The external step limit is 80. Custom layouts can be supplied in
+Python, with S=start, G=goal, H=hazard, #=wall and .=free. An optional
+`shaping_gamma` uses negative Manhattan distance as potential, with zero
+terminal potential. The CLI deliberately uses unshaped rewards; when enabling
+shaping in Python, match the agent discount and report base rewards separately.
+The finite time limit is an external interruption, not an observed clock.
+
+The following single-seed CPU pilot uses the dependency-free cores (not Gym
+adapters), 10,000 interactions per game, seed 0, 30 evaluation episodes at
+seed 1,000,000, hidden widths (64,64), batch 32, replay 10,000, warmup 256,
+target interval 100, epsilon decay 7,000, double/dueling/PER enabled and other
+DQN defaults. The table reports undiscounted shaped-by-task-rule returns (no
+potential shaping), not score or multi-seed evidence. Each run performed 2,437
+updates. Exact pilot configuration can be reconstructed using `make_game`,
+`DQNConfig`, `TrainConfig` and `run_experiment(factory=..., environment_id=...)`.
+
+- gridworld: greedy mean 0.7200; random mean -1.9067.
+- snake: greedy mean -0.1377; random mean -0.8007.
+
+The Snake pilot does not establish game mastery. Gymnasium checker and headless RGB rendering tests require Gymnasium; human display requires a graphical session. Use Ctrl-C to stop playback early.
 
 ## Roadmap and acceptance criteria
 

@@ -212,6 +212,7 @@ def run_experiment(
     path: Path, config: TrainConfig, *, eval_episodes: int = 100,
     eval_seed: int = 1_000_000, device: str = "cpu", plots: bool = True,
     dqn_config: DQNConfig | None = None,
+    factory: Factory = make_cartpole, environment_id: str = "CartPole-v1",
 ) -> dict:
     """Train once, then evaluate final weights against a random baseline."""
     if type(eval_episodes) is not int or eval_episodes < 1:
@@ -225,7 +226,7 @@ def run_experiment(
     import torch
 
     # Fail before creating a run directory if the environment is unavailable.
-    probe = make_cartpole()
+    probe = factory()
     probe.close()
     path.mkdir(parents=True, exist_ok=False)
     start = perf_counter()
@@ -237,13 +238,13 @@ def run_experiment(
                   f"return={record.reward:.0f} epsilon={record.epsilon:.3f}",
                   flush=True)
 
-    records = train(agent, config, on_episode=progress)
+    records = train(agent, config, factory=factory, on_episode=progress)
     agent.save(path / "model.pt")
-    greedy = evaluate(agent, episodes=eval_episodes, seed=eval_seed)
+    greedy = evaluate(agent, episodes=eval_episodes, seed=eval_seed, factory=factory)
     random = evaluate(agent, episodes=eval_episodes, seed=eval_seed,
-                      random_policy=True)
+                      random_policy=True, factory=factory)
     summary = {
-        "environment": "CartPole-v1", "device": device, "commit": _commit(),
+        "environment": environment_id, "device": device, "commit": _commit(),
         "versions": _versions(), "torch_threads": torch.get_num_threads(),
         "training": asdict(config),
         "dqn": asdict(agent.config), "updates": agent.updates,

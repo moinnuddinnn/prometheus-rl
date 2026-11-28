@@ -10,17 +10,21 @@ from prometheus_rl import __version__
 def main(argv: Sequence[str] | None = None) -> int:
     """Report project status or version."""
     argv = list(sys.argv[1:] if argv is None else argv)
-    if argv and argv[0] == "cartpole":
+    if argv and argv[0] in {"cartpole", "snake", "gridworld"}:
         try:
             from prometheus_rl.training.cartpole_cli import main as cartpole_main
 
-            return cartpole_main(argv[1:])
+            return cartpole_main(argv[1:], game=argv[0])
         except ModuleNotFoundError as error:
-            if error.name not in {"torch", "gymnasium", "matplotlib", "pygame"}:
+            if error.name not in {
+                "torch", "gymnasium", "matplotlib", "pygame", "numpy"
+            }:
                 raise
             raise SystemExit("Install the rl extra: pip install -e '.[rl]'") from error
-    parser = argparse.ArgumentParser(description=__doc__,
-                                     epilog="CartPole: prometheus-rl cartpole --help")
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        epilog="Games: cartpole, snake, gridworld (each supports --help)",
+    )
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument(
         "command", nargs="?",
@@ -112,8 +116,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"Greedy start action: {action}")
         print("Fixed-replay toy MDP; not online CartPole training.")
     else:
-        print("Prometheus-RL: Block 08 DQN agent implemented; "
-              "CartPole training and prioritized replay available.")
+        print("Prometheus-RL: Block 09 DQN agent implemented; "
+              "CartPole, Snake, GridWorld and prioritized replay available.")
     return 0
 
 
