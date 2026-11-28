@@ -2,7 +2,7 @@
 
 **A research-oriented reinforcement learning framework, built one algorithm at a time.**
 
-Status: Block 05 / v0.6.0 — vanilla DQN agent implemented; online CartPole training is next.
+Status: Block 06 / v0.7.0 — online CartPole training implemented; full benchmark pending.
 
 Prometheus-RL aims to implement interpretable, testable reinforcement learning algorithms from their mathematical definitions. We use Python for orchestration, NumPy for numerical computation, Gymnasium for environments, and PyTorch for differentiable function approximation. We will implement the learning logic ourselves rather than wrap an existing RL training library. CartPole is the first deep-RL benchmark; Atari and policy gradients are later milestones.
 
@@ -216,6 +216,53 @@ PyTorch 2.10.0). The targets are bootstrapped, unlike Block 03, but this is a
 fixed-replay sanity experiment, not online exploration or a CartPole benchmark.
 Tests cover the analytic solution, target flags, warm-up, gradient clipping,
 seed isolation, synchronization and checkpoint round trips.
+
+## Block 06: online CartPole training
+
+The DQN agent now collects transitions from Gymnasium `CartPole-v1` and updates
+its weights online. The training loop accepts a factory for isolated testing;
+observations are snapshotted, true terminations disable bootstrapping, and
+truncations end episodes without disabling the continuation target. The initial
+environment reset uses the training seed; later resets continue that RNG stream.
+The schedule is linear from epsilon 1 to 0.05 over 30,000 interactions, with
+one optimization attempt every four steps after the existing replay warmup.
+The default run is 100,000 interactions, not a fixed number of episodes.
+
+```sh
+python -m pip install -e '.[dev,rl]'
+prometheus-rl cartpole train --steps 1200 --eval-episodes 3 --output runs/smoke
+prometheus-rl cartpole train --steps 100000 --seed 0 --output runs/cartpole-0
+prometheus-rl cartpole evaluate runs/cartpole-0/model.pt --seed 2000000 --episodes 100
+prometheus-rl cartpole play runs/cartpole-0/model.pt --episodes 3
+```
+
+Each run uses a new output directory. It contains `model.pt`, `episodes.csv`,
+`summary.json`, `returns.png`, and `loss.png` (omit the plots with `--no-plots`).
+The CSV records completed episodes only; an unfinished episode at the exact
+interaction budget still contributes transitions and updates. `summary.json`
+records individual evaluation scores, means, sample standard deviations,
+configuration, dependency versions, Git revision, elapsed time and thread count.
+The final greedy model and a uniform random policy are evaluated using the same
+held-out reset seeds, without optimizer or replay updates. Evaluation does not
+select checkpoints. Human playback needs a desktop display and pygame.
+
+For the original five-seed benchmark, run:
+
+```sh
+for seed in 0 1 2 3 4; do
+  prometheus-rl cartpole train --steps 100000 --seed "$seed" \
+    --eval-seed "$((1000000 + 1000 * seed))" --eval-episodes 100 \
+    --output "runs/cartpole-$seed"
+done
+```
+
+The target remains mean >=475 for **each** agent; the smoke run is not evidence
+of achieving it. Locally, 111 tests passed and the real-Gymnasium smoke test was
+skipped because Gymnasium could not be installed in the build environment. A
+controlled one-step online task learned the better action (mean reward 1.0 vs
+random 0.5 on 50 episodes); this validates the loop, not CartPole control. The CI
+CartPole job installs the real dependency and performs a short interaction test.
+No CartPole performance numbers are claimed before the full benchmark runs.
 
 ## Roadmap and acceptance criteria
 
